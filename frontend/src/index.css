@@ -1,0 +1,60 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  /* Background is managed by App.jsx or body class */
+  /* Prevent iOS Safari zoom on orientation change */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+    monospace;
+}
+
+/* Prevent auto-zoom on input focus - Mobile Safari fix */
+@media screen and (max-width: 768px) {
+
+  input[type="text"],
+  input[type="email"],
+  input[type="password"],
+  input[type="search"],
+  input[type="tel"],
+  input[type="number"],
+  select,
+  textarea {
+    font-size: 16px !important;
+    /* iOS requires 16px to prevent zoom */
+  }
+
+  /* Allow touch manipulation on charts/graphs */
+  .recharts-wrapper,
+  .recharts-surface,
+  svg,
+  canvas {
+    touch-action: pan-x pan-y pinch-zoom !important;
+  }
+
+  /* Prevent double-tap zoom on buttons and links */
+  button,
+  a {
+    touch-action: manipulation;
+  }
+}
+
+/* Desktop - Normal behavior */
+@media screen and (min-width: 769px) {
+
+  /* Allow normal zoom and interactions */
+  * {
+    touch-action: auto;
+  }
+}

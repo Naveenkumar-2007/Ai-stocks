@@ -1,0 +1,53 @@
+# Python & Generic
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.env
+*.log
+.DS_Store
+
+# Training & MLOps Artifacts
+**/*.tfevents.*
+**/events.out.tfevents.*
+**/tensorboard/
+mlruns/
+.mlflow/
+backend/mlflow.db
+backend/mlruns/
+backend/logs/
+backend/cache/
+mlops/checkpoints/
+mlops/logs/
+cache/
+artifacts/
+
+# Dependencies & Build
+node_modules/
+**/node_modules/
+frontend/node_modules/
+backend/node_modules/
+frontend/build/
+frontend/dist/
+frontend/.env
+frontend/.env.local
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Models (Keep ONLY these for production)
+!backend/artifacts/
+!backend/artifacts/*.h5
+!backend/artifacts/*.pkl
+!backend/mlops/model_registry/
+!backend/mlops/model_registry/metadata.json
+!backend/mlops/model_registry/model_store/
+!backend/mlops/model_registry/model_store/**/model.h5
+!backend/mlops/model_registry/model_store/**/scaler.pkl

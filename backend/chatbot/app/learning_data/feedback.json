@@ -1,0 +1,37 @@
+[
+  {
+    "question": "hi",
+    "answer": "Hey there! 👋 I'm your AI Trading Intelligence assistant! Ready to dive into some stock analysis? 📈 What's on your mind? Want to discuss a specific stock or explore some market trends?",
+    "rating": "thumbs_up",
+    "chat_id": "da9776c1-243d-4cfa-959b-8c80c0d14277",
+    "timestamp": "2026-02-19T18:08:53.451511"
+  },
+  {
+    "question": "How is Apple doing today?",
+    "answer": "📊 **AAPL — Apple**\n\n💰 **Current Price:** $264.35 (▲ 0.18%)\n\n📈 **Technical Snapshot:**\nUnfortunately, our technical indicator data is not available at this time. However, I can tell you that Apple's stock has opened at $263.60 and has reached a high of $266.82, with a low of $262.45. The current price of $264.35 represents a slight increase of 0.18% from the previous close of $263.88.\n\n📰 **Recent News:**\n• Apple has been featured in a report on sleep aids, highlighting the company's involvement in the industry alongside other key players.\n• The overall market sentiment seems cautious, with Walmart's outlook and tech qualms affecting Wall Street.\n• There's buzz about smart glasses potentially being the next big gadget hit in 2026, which could be an area of interest for Apple.\n• Global events, such as US-Iran tensions, are impacting risk assets, including Bitcoin, and driving demand for safe-haven assets like gold.\n\n🤖 **AI Model Insight:**\nUnfortunately, we don't have a trained LSTM model available for Apple at this time, so we can't provide any AI-generated predictions.\n\n🎯 **Analysis Summary:**\nApple's stock is seeing a slight uptick today, with a 0.18% increase from the previous close. While we don't have technical indicator data, the company's involvement in emerging trends like sleep aids and potential future products like smart glasses could be worth keeping an eye on. As always, it's essential to consider the broader market context and global events that may impact the stock's performance.\n\n⚠️ *This is AI-generated analysis for educational purposes only. Not financial advice.*",
+    "rating": "thumbs_up",
+    "chat_id": "6e6654a5-52c9-4530-ae21-303fddc819c7",
+    "timestamp": "2026-02-19T18:27:36.903049"
+  },
+  {
+    "question": "haa have you eat or not",
+    "answer": "I appreciate your curiosity! 😊 However, I'm specifically designed for stocks, trading, and financial analysis. I don't have a physical body, so I don't eat or drink. I exist solely to provide information and assist with your financial questions. Feel free to ask about any stock, strategy, or market concept — I'm here to help! 📈",
+    "rating": "thumbs_up",
+    "chat_id": "90b33006-a0d6-4921-80c2-24509903a190",
+    "timestamp": "2026-02-23T19:35:06.850754"
+  },
+  {
+    "question": "haa have you eat or not",
+    "answer": "I appreciate your curiosity! 😊 However, I'm specifically designed for stocks, trading, and financial analysis. I don't have a physical body, so I don't eat or drink. I exist solely to provide information and assist with your financial questions. Feel free to ask about any stock, strategy, or market concept — I'm here to help! 📈",
+    "rating": "thumbs_down",
+    "chat_id": "90b33006-a0d6-4921-80c2-24509903a190",
+    "timestamp": "2026-02-23T19:35:15.254015"
+  },
+  {
+    "question": "ohh thanks",
+    "answer": "You're welcome, Naveen! 😊 It was my pleasure to chat with you. If you have any questions about stocks, finance, or trading, or just want to say hello, I'm here to help. Have a great day! 📈",
+    "rating": "thumbs_up",
+    "chat_id": "d3c5ce3d-83e1-4135-a26a-374b23bf55b8",
+    "timestamp": "2026-02-24T01:32:28.053837"
+  }
+]

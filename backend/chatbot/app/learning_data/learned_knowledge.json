@@ -1,0 +1,30 @@
+[
+  {
+    "question": "hi",
+    "answer": "Hey there! 👋 I'm your AI Trading Intelligence assistant! Ready to dive into some stock analysis? 📈 What's on your mind? Want to discuss a specific stock or explore some market trends?",
+    "count": 1,
+    "created_at": "2026-02-19T18:08:53.455267",
+    "updated_at": "2026-02-19T18:08:53.455267"
+  },
+  {
+    "question": "How is Apple doing today?",
+    "answer": "📊 **AAPL — Apple**\n\n💰 **Current Price:** $264.35 (▲ 0.18%)\n\n📈 **Technical Snapshot:**\nUnfortunately, our technical indicator data is not available at this time. However, I can tell you that Apple's stock has opened at $263.60 and has reached a high of $266.82, with a low of $262.45. The current price of $264.35 represents a slight increase of 0.18% from the previous close of $263.88.\n\n📰 **Recent News:**\n• Apple has been featured in a report on sleep aids, highlighting the company's involvement i",
+    "count": 1,
+    "created_at": "2026-02-19T18:27:36.905097",
+    "updated_at": "2026-02-19T18:27:36.905097"
+  },
+  {
+    "question": "haa have you eat or not",
+    "answer": "I appreciate your curiosity! 😊 However, I'm specifically designed for stocks, trading, and financial analysis. I don't have a physical body, so I don't eat or drink. I exist solely to provide information and assist with your financial questions. Feel free to ask about any stock, strategy, or market concept — I'm here to help! 📈",
+    "count": 1,
+    "created_at": "2026-02-23T19:35:06.859714",
+    "updated_at": "2026-02-23T19:35:06.859714"
+  },
+  {
+    "question": "ohh thanks",
+    "answer": "You're welcome, Naveen! 😊 It was my pleasure to chat with you. If you have any questions about stocks, finance, or trading, or just want to say hello, I'm here to help. Have a great day! 📈",
+    "count": 1,
+    "created_at": "2026-02-24T01:32:28.056570",
+    "updated_at": "2026-02-24T01:32:28.056570"
+  }
+]

@@ -1,0 +1,38 @@
+schema: '2.0'
+stages:
+  train_aapl:
+    cmd: python mlops/training_pipeline.py --ticker AAPL
+    deps:
+    - path: mlops/training_pipeline.py
+      hash: md5
+      md5: 5cd97653ad991260bc5b2556dddb655b
+      size: 21081
+    - path: src/components/data_ingestion.py
+      hash: md5
+      md5: f7276827a52e411eb79256f4c535377a
+      size: 7041
+    - path: src/components/data_transformation.py
+      hash: md5
+      md5: d4755520311f444d701a75b9298c0fc6
+      size: 2701
+    - path: src/components/model_trainer.py
+      hash: md5
+      md5: 213fa26415e15dd6e1ff8fd9af76ae4f
+      size: 3389
+    params:
+      mlops/config.py:
+        MLOpsConfig.DEFAULT_BATCH_SIZE: 32
+        MLOpsConfig.DEFAULT_EPOCHS: 50
+    outs:
+    - path: artifacts/AAPL_features.json
+      hash: md5
+      md5: 0bab280f82cc8919d1319c845f1e30a5
+      size: 513
+    - path: artifacts/AAPL_lstm_model.h5
+      hash: md5
+      md5: e0c0be6918077efe2263a5436cddf415
+      size: 2047096
+    - path: artifacts/AAPL_scaler.pkl
+      hash: md5
+      md5: 95442bc24e12f4299beb256cf082717c
+      size: 1856

@@ -1,0 +1,20 @@
+stages:
+  train_all:
+    desc: "Main MLOps training entry point. Tracks configuration and registry lineage."
+    cmd: python backend/scheduler.py --once
+    deps:
+      - mlops/training_pipeline.py
+      - mlops/stocks.json
+      - src/components/data_ingestion.py
+      - src/components/data_transformation.py
+      - src/components/model_trainer.py
+    params:
+      - mlops/config.py:
+          - MLOpsConfig.DEFAULT_EPOCHS
+          - MLOpsConfig.DEFAULT_BATCH_SIZE
+    outs:
+      - mlops/model_registry:
+          persist: true
+    metrics:
+      - mlops/model_registry/metadata.json:
+          cache: false

@@ -1,0 +1,96 @@
+:root {
+  /* Light theme (default for CSS vars) */
+  --color-bg: #FFFFFF;
+  --color-card: #F8F9FA;
+  --color-elevated: #FFFFFF;
+  --color-border: #E5E7EB;
+  --color-text-primary: #1F2937;
+  --color-text-secondary: #4B5563;
+  --color-text-muted: #6B7280;
+
+  /* Brand colors */
+  --color-cyan: #00B8FF;
+  --color-cyan-hover: #0099FF;
+  --color-cyan-light: #22D3EE;
+}
+
+.dark {
+  /* Dark theme overrides */
+  --color-bg: #0A0E1F;
+  --color-card: #131833;
+  --color-elevated: #1A2038;
+  --color-border: #252B4A;
+  --color-text-primary: #F8FAFC;
+  --color-text-secondary: #CBD5E1;
+  --color-text-muted: #94A3B8;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* Force all charts to stay within bounds */
+.recharts-wrapper,
+.recharts-surface,
+.recharts-responsive-container {
+  max-width: 100% !important;
+  overflow: hidden !important;
+}
+
+.recharts-cartesian-grid,
+.recharts-cartesian-axis {
+  overflow: hidden !important;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: var(--color-bg);
+  color: var(--color-text-primary);
+  transition: background-color 0.3s ease, color 0.3s ease;
+  /* Prevent text size adjustment on mobile */
+  -webkit-text-size-adjust: 100%;
+  -moz-text-size-adjust: 100%;
+  -ms-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  /* Better touch scrolling */
+  -webkit-overflow-scrolling: touch;
+  /* Prevent tap highlighting */
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Improve touch targets for mobile */
+@media (max-width: 768px) {
+
+  button,
+  a,
+  input,
+  select {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  /* Better spacing for mobile charts */
+  .recharts-wrapper {
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+  }
+
+  /* Prevent zoom on input focus */
+  input,
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}
+
+/* Smooth transitions */
+* {
+  -webkit-tap-highlight-color: transparent;
+}
