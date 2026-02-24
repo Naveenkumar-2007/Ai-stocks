@@ -1398,7 +1398,7 @@ def predict_with_technical_analysis(hist, current_price):
 
 # Serve React App (with caching)
 @app.route('/', defaults={'path': ''})
-@app.route('/<path:path>')
+@app.route('/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'])
 def serve(path):
     """Serve React frontend with proper caching and SPA routing support
     This function will:
