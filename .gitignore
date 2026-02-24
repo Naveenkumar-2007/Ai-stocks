@@ -51,3 +51,5 @@ frontend/.env.local
 !backend/mlops/model_registry/model_store/
 !backend/mlops/model_registry/model_store/**/model.h5
 !backend/mlops/model_registry/model_store/**/scaler.pkl
+*.txt
+*.log
