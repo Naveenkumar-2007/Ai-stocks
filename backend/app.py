@@ -22,6 +22,26 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+
+def _proxy_chatbot(subpath: str):
+    """Forward requests to the FastAPI chatbot running on port 8001."""
+    import requests as _requests
+    url = f'http://127.0.0.1:8001{subpath}'
+    try:
+        resp = _requests.request(
+            method=request.method,
+            url=url,
+            headers={k: v for k, v in request.headers if k.lower() != 'host'},
+            data=request.get_data(),
+            params=request.args,
+            timeout=120,
+        )
+        excluded_headers = {'content-encoding', 'content-length', 'transfer-encoding', 'connection'}
+        headers = {k: v for k, v in resp.headers.items() if k.lower() not in excluded_headers}
+        return (resp.content, resp.status_code, headers)
+    except Exception as e:
+        return jsonify({'error': 'Chatbot service unavailable', 'detail': str(e)}), 503
+
 # Heavy imports (pandas, numpy, ta, stock_api) will be lazy-loaded when needed
 # for standard production configuration
 
@@ -1372,6 +1392,10 @@ def serve(path):
     if path.startswith('api/'):
         app.logger.debug(f"API path requested that was not matched: {path}")
         return jsonify({'error': 'API endpoint not found'}), 404
+
+    # Proxy chatbot routes to FastAPI chatbot on port 8001
+    if path.startswith('chatbot/'):
+        return _proxy_chatbot(path[len('chatbot'):])
 
     # Serve static assets if they exist
     static_path = os.path.join(app.static_folder, path)

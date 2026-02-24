@@ -19,5 +19,18 @@ done
 
 echo "✅ Environment variables injected successfully"
 
-# Start Gunicorn
+# Start the chatbot FastAPI server in the background on port 8001
+echo "🤖 Starting chatbot server on port 8001..."
+cd /app/chatbot/app
+PYTHONPATH=/app/chatbot/app:$PYTHONPATH python -m uvicorn main:app --host 127.0.0.1 --port 8001 --workers 1 --log-level info &
+CHATBOT_PID=$!
+cd /app
+sleep 3
+if kill -0 $CHATBOT_PID 2>/dev/null; then
+  echo "✅ Chatbot server started (PID: $CHATBOT_PID)"
+else
+  echo "⚠️ Chatbot server failed to start, continuing without it"
+fi
+
+# Start Gunicorn (main Flask app)
 exec gunicorn --bind 0.0.0.0:7860 --timeout 120 --workers 2 app:app

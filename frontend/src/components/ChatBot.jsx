@@ -10,7 +10,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useTheme } from '../contexts/ThemeContext';
 
-const API = 'http://localhost:8001';
+const API = window.location.origin + '/chatbot';
 
 const EMOJIS = {
     '📈 Trading': ['📈', '📉', '📊', '💰', '💵', '🏦', '💎', '🚀', '🔥', '⚡', '🎯', '✅', '❌'],
