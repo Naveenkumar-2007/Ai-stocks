@@ -28,10 +28,18 @@ def _proxy_chatbot(subpath: str):
     import requests as _requests
     url = f'http://127.0.0.1:8001{subpath}'
     try:
+        # Build headers — keep content-type, drop hop-by-hop headers
+        fwd_headers = {}
+        for k, v in request.headers:
+            kl = k.lower()
+            if kl in ('host', 'transfer-encoding', 'connection'):
+                continue
+            fwd_headers[k] = v
+
         resp = _requests.request(
             method=request.method,
             url=url,
-            headers={k: v for k, v in request.headers if k.lower() != 'host'},
+            headers=fwd_headers,
             data=request.get_data(),
             params=request.args,
             timeout=120,
@@ -39,6 +47,8 @@ def _proxy_chatbot(subpath: str):
         excluded_headers = {'content-encoding', 'content-length', 'transfer-encoding', 'connection'}
         headers = {k: v for k, v in resp.headers.items() if k.lower() not in excluded_headers}
         return (resp.content, resp.status_code, headers)
+    except _requests.exceptions.ConnectionError:
+        return jsonify({'error': 'Chatbot service is starting up or unavailable', 'detail': 'The chatbot server at port 8001 is not responding. It may still be initializing.'}), 503
     except Exception as e:
         return jsonify({'error': 'Chatbot service unavailable', 'detail': str(e)}), 503
 
@@ -130,7 +140,7 @@ configure_logging(app)
 
 # Allow CORS from all origins for API endpoints
 # Allow CORS from all origins for local development to prevent connectivity issues
-CORS(app, resources={r"/api/*": {"origins": "*"}}, supports_credentials=True)
+CORS(app, resources={r"/api/*": {"origins": "*"}, r"/chatbot/*": {"origins": "*"}}, supports_credentials=True)
 
 firebase_ready = initialize_firebase_admin()
 if firebase_ready:
@@ -327,8 +337,17 @@ def load_saved_scaler(ticker):
 @app.route('/health')
 def health_check():
     """Simple health check endpoint"""
+    # Also check if chatbot server is reachable
+    chatbot_status = 'unknown'
+    try:
+        import requests as _requests
+        r = _requests.get('http://127.0.0.1:8001/', timeout=3)
+        chatbot_status = 'healthy' if r.status_code == 200 else f'error ({r.status_code})'
+    except Exception as e:
+        chatbot_status = f'unreachable ({type(e).__name__})'
     return jsonify({
         'status': 'healthy',
+        'chatbot': chatbot_status,
         'version': '1.0.1-safety-gate',
         'timestamp': datetime.now().isoformat()
     })

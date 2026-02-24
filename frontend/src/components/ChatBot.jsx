@@ -152,6 +152,7 @@ const ChatBot = () => {
             let errorMsg = "Couldn't reach the analysis engine.";
             if (err.code === 'ECONNABORTED') errorMsg = "🕒 Analysis is taking longer than expected. Please try again in 30 seconds.";
             else if (err.response?.data?.detail) errorMsg = `⚠️ ${err.response.data.detail}`;
+            else if (err.response?.data?.error) errorMsg = `⚠️ ${err.response.data.error}`;
             else if (!err.response) errorMsg = '⚠️ Backend offline. Ensure the chatbot server is running.';
 
             setMessages(p => [...p, { role: 'assistant', content: errorMsg }]);

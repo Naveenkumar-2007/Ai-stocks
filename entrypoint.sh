@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+# Do NOT use set -e — we want Gunicorn to start even if chatbot fails
 
 echo "🔧 Injecting runtime environment variables into React build..."
 
@@ -19,18 +19,33 @@ done
 
 echo "✅ Environment variables injected successfully"
 
+# Log available API keys (masked) for debugging
+echo "🔑 GROQ_API_KEY: ${GROQ_API_KEY:+SET (${#GROQ_API_KEY} chars)}${GROQ_API_KEY:-NOT SET}"
+echo "🔑 FINNHUB_API_KEY: ${FINNHUB_API_KEY:+SET}${FINNHUB_API_KEY:-NOT SET}"
+echo "🔑 FINNHUB_API_KEYS: ${FINNHUB_API_KEYS:+SET}${FINNHUB_API_KEYS:-NOT SET}"
+
 # Start the chatbot FastAPI server in the background on port 8001
 echo "🤖 Starting chatbot server on port 8001..."
+export PYTHONPATH="/app/chatbot/app:/app:${PYTHONPATH:-}"
 cd /app/chatbot/app
-PYTHONPATH=/app/chatbot/app:$PYTHONPATH python -m uvicorn main:app --host 127.0.0.1 --port 8001 --workers 1 --log-level info &
+python -m uvicorn main:app --host 127.0.0.1 --port 8001 --workers 1 --log-level info 2>&1 &
 CHATBOT_PID=$!
 cd /app
-sleep 3
-if kill -0 $CHATBOT_PID 2>/dev/null; then
-  echo "✅ Chatbot server started (PID: $CHATBOT_PID)"
-else
-  echo "⚠️ Chatbot server failed to start, continuing without it"
-fi
+
+# Wait for chatbot to initialize (it loads ML models, may take a few seconds)
+echo "⏳ Waiting for chatbot to initialize..."
+for i in $(seq 1 10); do
+  if curl -s http://127.0.0.1:8001/ > /dev/null 2>&1; then
+    echo "✅ Chatbot server is ready (PID: $CHATBOT_PID)"
+    break
+  fi
+  if ! kill -0 $CHATBOT_PID 2>/dev/null; then
+    echo "⚠️ Chatbot server process exited — continuing without it"
+    break
+  fi
+  sleep 2
+done
 
 # Start Gunicorn (main Flask app)
+echo "🚀 Starting Gunicorn on port 7860..."
 exec gunicorn --bind 0.0.0.0:7860 --timeout 120 --workers 2 app:app
