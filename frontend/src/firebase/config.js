@@ -34,10 +34,10 @@ const requiredKeys = [
 const missingKeys = requiredKeys.filter((key) => !process.env[key]);
 
 if (missingKeys.length > 0) {
-  // Log a clear error so developers know which env entries are absent.
-  console.error('Firebase configuration is missing the following environment variables:', missingKeys);
-  // Warn but don't crash - allow the app to try loading (it might fail later or use mocks if implemented)
-  console.warn('Proceeding with incomplete Firebase config to prevent blank page crash.');
+  console.error('Firebase configuration error: The following environment variables are missing:', missingKeys);
+  console.info('Tip: Ensure you have a .env file in the frontend/ directory with these variables defined.');
+} else if (!firebaseConfig.apiKey || firebaseConfig.apiKey.length < 10) {
+  console.error('Firebase configuration error: REACT_APP_FIREBASE_API_KEY appears to be invalid or too short.');
 }
 
 let app;
@@ -50,6 +50,7 @@ try {
   auth = getAuth(app);
   googleProvider = new GoogleAuthProvider();
   googleProvider.setCustomParameters({ prompt: 'select_account' });
+  console.log("Firebase initialization successful");
 } catch (error) {
   console.error("Firebase initialization failed:", error);
   initializationError = error;
