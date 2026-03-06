@@ -119,18 +119,11 @@ class ModelTrainingScheduler:
             logger.error(f"❌ [MLOps] Critical error in scheduler job: {e}")
     
     def run_scheduler(self):
-        """Run the scheduler loop"""
-        logger.info("🚀 MLOps Hourly Scheduler Heartbeat Started")
+        """Run the scheduler loop — trains once daily at 6:00 PM IST (12:30 UTC)"""
+        logger.info("🚀 MLOps Daily Scheduler Started — Training at 18:00 IST (12:30 UTC) every day")
         
-        # Run an immediate training on startup (to catch up after sleep/restart)
-        logger.info("🔄 Running immediate catch-up training on startup...")
-        try:
-            self.train_models_job()
-        except Exception as e:
-            logger.error(f"❌ Startup catch-up training failed: {e}")
-        
-        # Then schedule hourly runs (internal skip-if-already-trained logic prevents duplicates)
-        schedule.every().hour.do(self.train_models_job)
+        # Schedule exactly once per day at 12:30 UTC = 6:00 PM IST
+        schedule.every().day.at("12:30").do(self.train_models_job)
         
         while self.is_running:
             schedule.run_pending()
