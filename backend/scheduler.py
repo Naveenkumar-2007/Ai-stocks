@@ -13,8 +13,20 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
-# Redirect logging to the main application log
-logger = logging.getLogger('app') # This aligns with app.py's logging name
+# Use the 'scheduler' logger and also write to the app log file
+logger = logging.getLogger('scheduler')
+logger.setLevel(logging.INFO)
+
+# Ensure scheduler logs also go to the rotating app.log file
+try:
+    from logging.handlers import RotatingFileHandler
+    import os
+    os.makedirs('logs', exist_ok=True)
+    _file_handler = RotatingFileHandler('logs/app.log', maxBytes=1_048_576, backupCount=3)
+    _file_handler.setFormatter(logging.Formatter('[%(asctime)s] %(levelname)s in %(name)s: %(message)s'))
+    logger.addHandler(_file_handler)
+except Exception:
+    pass  # Fall back to stdout only
 
 class ModelTrainingScheduler:
     """Schedules automatic model training using the Professional MLOps Pipeline"""
@@ -110,8 +122,14 @@ class ModelTrainingScheduler:
         """Run the scheduler loop"""
         logger.info("🚀 MLOps Hourly Scheduler Heartbeat Started")
         
-        # INCREASED FREQUENCY: Run every hour to ensure we don't miss the daily window
-        # The internal logic `_get_last_training_date` ensures we only train once per calendar day.
+        # Run an immediate training on startup (to catch up after sleep/restart)
+        logger.info("🔄 Running immediate catch-up training on startup...")
+        try:
+            self.train_models_job()
+        except Exception as e:
+            logger.error(f"❌ Startup catch-up training failed: {e}")
+        
+        # Then schedule hourly runs (internal skip-if-already-trained logic prevents duplicates)
         schedule.every().hour.do(self.train_models_job)
         
         while self.is_running:

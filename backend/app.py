@@ -401,6 +401,23 @@ def cleanup_expired_cache():
         'files_removed': removed
     })
 
+# Health endpoint — keeps Hugging Face Spaces awake and shows training diagnostics
+@app.route('/api/health')
+def health_check():
+    """Health check with training status — useful for external uptime monitors"""
+    try:
+        from scheduler import scheduler
+        status = scheduler.get_status()
+        return jsonify({
+            'status': 'ok',
+            'timestamp': datetime.now().isoformat(),
+            'scheduler_running': status.get('is_running', False),
+            'last_training': status.get('last_training'),
+            'next_training': status.get('next_training'),
+        })
+    except Exception as e:
+        return jsonify({'status': 'ok', 'timestamp': datetime.now().isoformat(), 'scheduler_error': str(e)})
+
 # Model Training & Status Endpoints
 
 @app.route('/api/models/training-status')

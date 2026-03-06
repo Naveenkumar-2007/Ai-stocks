@@ -47,5 +47,7 @@ for i in $(seq 1 10); do
 done
 
 # Start Gunicorn (main Flask app)
-echo "🚀 Starting Gunicorn on port 7860..."
-exec gunicorn --bind 0.0.0.0:7860 --timeout 120 --workers 2 app:app
+# Use --preload so the scheduler starts ONCE in the master process before forking workers.
+# Use 1 worker to prevent duplicate scheduler threads.
+echo "🚀 Starting Gunicorn on port 7860 (single worker + preload for scheduler)..."
+exec gunicorn --bind 0.0.0.0:7860 --timeout 300 --workers 1 --preload app:app

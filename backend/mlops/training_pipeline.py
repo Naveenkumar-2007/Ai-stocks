@@ -11,6 +11,16 @@ import numpy as np
 from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint, TensorBoard
 import pickle
 
+# Optional MLflow import — training works without it
+try:
+    import mlflow
+    import mlflow.tensorflow
+    from mlflow.models.signature import infer_signature
+    HAS_MLFLOW = True
+except ImportError:
+    mlflow = None
+    HAS_MLFLOW = False
+
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -32,12 +42,12 @@ class MLOpsTrainingPipeline:
         Args:
             registry_path: Path to model registry directory
         """
-        import mlflow
         from mlops.config import MLOpsConfig
         
-        # Configure MLflow
-        mlflow.set_tracking_uri(MLOpsConfig.MLFLOW_TRACKING_URI)
-        mlflow.set_experiment(MLOpsConfig.MLFLOW_EXPERIMENT_NAME)
+        # Configure MLflow if available
+        if HAS_MLFLOW:
+            mlflow.set_tracking_uri(MLOpsConfig.MLFLOW_TRACKING_URI)
+            mlflow.set_experiment(MLOpsConfig.MLFLOW_EXPERIMENT_NAME)
         
         self.registry = ModelRegistry(registry_path)
         self.logs_dir = 'mlops/logs'
@@ -58,11 +68,8 @@ class MLOpsTrainingPipeline:
         days: int = 730
     ) -> Dict:
         """
-        Execute complete training pipeline for a stock ticker with MLflow tracking
+        Execute complete training pipeline for a stock ticker with optional MLflow tracking
         """
-        import mlflow
-        import mlflow.tensorflow
-        
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         
         print(f"\n{'='*70}")
@@ -70,166 +77,167 @@ class MLOpsTrainingPipeline:
         print(f"Started: {timestamp}")
         print(f"{'='*70}\n")
         
-        # Start MLflow run
-        with mlflow.start_run(run_name=f"{ticker}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"):
-            # Enable autologging for metrics/params ONLY, we'll log model manually for signature support
-            mlflow.tensorflow.autolog(log_models=False)
-            
-            # Log tags and parameters
-            mlflow.set_tag("ticker", ticker)
-            mlflow.set_tag("trained_at", timestamp)
-            mlflow.log_params({
-                "ticker": ticker,
-                "epochs": epochs,
-                "batch_size": batch_size,
-                "days": days
-            })
-            
+        # MLflow context manager (no-op if mlflow not available)
+        mlflow_ctx = mlflow.start_run(run_name=f"{ticker}_{datetime.now().strftime('%Y%m%d_%H%M%S')}") if HAS_MLFLOW else None
+        if mlflow_ctx:
+            mlflow_ctx.__enter__()
             try:
-                # Track current ticker for feature list saving
-                self._current_ticker = ticker
-                
-                # Step 1: Data Ingestion
-                print("Step 1/6: Data Ingestion")
-                print("-" * 70)
-                raw_data = self._ingest_data(ticker, days=days)
-                print(f"Fetched {len(raw_data)} data points\n")
-                
-                # Step 2: Data Preprocessing
-                print("🔧 Step 2/6: Data Preprocessing")
-                print("-" * 70)
-                train_data, test_data = self._preprocess_data(raw_data)
-                print(f"Train: {len(train_data)} | Test: {len(test_data)}\n")
-                
-                # Step 3: Data Transformation
-                print("Step 3/6: Data Transformation")
-                print("-" * 70)
-                X_train, y_train, X_test, y_test, scaler, feature_cols = self._transform_data(
-                    train_data, test_data
-                )
-                print(f"X_train: {X_train.shape} | y_train: {y_train.shape}")
-                print(f"Features: {feature_cols}\n")
-                
-                # CRITICAL: Resilience check for small datasets
-                if len(X_train) == 0 or len(X_test) == 0:
-                    print(f"⚠️ Skipping {ticker}: Insufficient data to create sequences (need > 60 samples after preprocessing).")
-                    mlflow.log_param("skipped", "true")
-                    mlflow.log_param("skip_reason", "insufficient_data")
-                    return {"success": False, "message": "Insufficient data"}
-                
-                # Log feature list to UNIFIED LIBRARY
-                self.registry._update_feature_library(ticker, feature_cols)
-                
-                # Define model signature (for professional MLflow tracing)
-                from mlflow.models.signature import infer_signature
-                signature = infer_signature(X_train[:1], y_train[:1])
-                
-                # Log environment as artifact
-                mlflow.log_artifact("requirements.txt")
-                
-                # Step 4: Model Training
-                print("Step 4/6: Model Training")
-                print("-" * 70)
-                model, history = self._train_model(
-                    ticker, X_train, y_train, X_test, y_test,
-                    epochs, batch_size
-                )
-                print(f"Training completed in {len(history.history['loss'])} epochs\n")
-                
-                # Step 5: Model Evaluation
-                print("Step 5/6: Model Evaluation")
-                print("-" * 70)
-                metrics = self._evaluate_model(model, history, X_test, y_test, scaler, len(train_data))
-                self._print_metrics(metrics)
-                
-                # Log custom metrics to MLflow
-                mlflow.log_metrics({
-                    "price_rmse": metrics['rmse'],
-                    "price_mae": metrics['mae'],
-                    "r2_score": metrics['r2'],
-                    "mape": metrics['mape'],
-                    "directional_accuracy": metrics['directional_accuracy']
-                })
-                
-                # Skipping training plots to save storage space
-                print()
-                
-                # Internal registry backup (Saves scaler to artifacts/scaler.pkl)
-                model_info = self._save_and_register(
-                    ticker, model, scaler, metrics
-                )
-                
-                # 1. Log scaler to MLflow for consolidated versioning
-                generic_scaler_path = os.path.join(self.artifacts_dir, 'scaler.pkl')
-                if os.path.exists(generic_scaler_path):
-                    mlflow.log_artifact(generic_scaler_path, "preprocessing")
-
-                # 2. Register model in MLflow Model Registry
-                model_name = f"LSTM_{ticker}"
-                mlflow.tensorflow.log_model(
-                    model, 
-                    "model", 
-                    signature=signature
-                )
-                model_uri = f"runs:/{mlflow.active_run().info.run_id}/model"
-                mv = mlflow.register_model(model_uri, model_name)
-                
-                # --- CHAMPION vs CHALLENGER LOGIC ---
-                # Only promote to Production if MAPE is better than existing champion
-                print(f"Checking if challenger (v{mv.version}) is better than champion...")
-                client = mlflow.tracking.MlflowClient()
-                is_prod_ready = True
-                
+                mlflow.tensorflow.autolog(log_models=False)
+                mlflow.set_tag("ticker", ticker)
+                mlflow.set_tag("trained_at", timestamp)
+                mlflow.log_params({"ticker": ticker, "epochs": epochs, "batch_size": batch_size, "days": days})
+            except Exception:
+                pass
+        
+        try:
+            # Track current ticker for feature list saving
+            self._current_ticker = ticker
+            
+            # Step 1: Data Ingestion
+            print("Step 1/6: Data Ingestion")
+            print("-" * 70)
+            raw_data = self._ingest_data(ticker, days=days)
+            print(f"Fetched {len(raw_data)} data points\n")
+            
+            # Step 2: Data Preprocessing
+            print("🔧 Step 2/6: Data Preprocessing")
+            print("-" * 70)
+            train_data, test_data = self._preprocess_data(raw_data)
+            print(f"Train: {len(train_data)} | Test: {len(test_data)}\n")
+            
+            # Step 3: Data Transformation
+            print("Step 3/6: Data Transformation")
+            print("-" * 70)
+            X_train, y_train, X_test, y_test, scaler, feature_cols = self._transform_data(
+                train_data, test_data
+            )
+            print(f"X_train: {X_train.shape} | y_train: {y_train.shape}")
+            print(f"Features: {feature_cols}\n")
+            
+            # CRITICAL: Resilience check for small datasets
+            if len(X_train) == 0 or len(X_test) == 0:
+                print(f"⚠️ Skipping {ticker}: Insufficient data to create sequences (need > 60 samples after preprocessing).")
+                if HAS_MLFLOW:
+                    try:
+                        mlflow.log_param("skipped", "true")
+                        mlflow.log_param("skip_reason", "insufficient_data")
+                    except Exception:
+                        pass
+                return {"success": False, "message": "Insufficient data"}
+            
+            # Log feature list to UNIFIED LIBRARY
+            self.registry._update_feature_library(ticker, feature_cols)
+            
+            # Step 4: Model Training
+            print("Step 4/6: Model Training")
+            print("-" * 70)
+            model, history = self._train_model(
+                ticker, X_train, y_train, X_test, y_test,
+                epochs, batch_size
+            )
+            print(f"Training completed in {len(history.history['loss'])} epochs\n")
+            
+            # Step 5: Model Evaluation
+            print("Step 5/6: Model Evaluation")
+            print("-" * 70)
+            metrics = self._evaluate_model(model, history, X_test, y_test, scaler, len(train_data))
+            self._print_metrics(metrics)
+            
+            # Log metrics to MLflow if available
+            if HAS_MLFLOW:
                 try:
-                    prod_versions = client.get_latest_versions(model_name, stages=["Production"])
-                    if prod_versions:
-                        champion_run = client.get_run(prod_versions[0].run_id)
-                        champion_mape = champion_run.data.metrics.get("mape", float('inf'))
-                        challenger_mape = metrics['mape']
-                        
-                        if challenger_mape >= champion_mape:
-                            print(f" CHALLENGER REJECTED: MAPE ({challenger_mape:.2f}%) >= Champion MAPE ({champion_mape:.2f}%)")
-                            is_prod_ready = False
-                            client.transition_model_version_stage(model_name, mv.version, "Staging")
-                        else:
-                            print(f"🏆 NEW CHAMPION: MAPE ({challenger_mape:.2f}%) < Champion MAPE ({champion_mape:.2f}%)")
-                except Exception as e:
-                    print(f"Error comparing models: {e}. Defaulting to Production promotion.")
-                
-                if is_prod_ready:
-                    print(f"🚀 Promoting {model_name} v{mv.version} to Production...")
-                    client.transition_model_version_stage(
-                        name=model_name,
-                        version=mv.version,
-                        stage="Production",
-                        archive_existing_versions=True
-                    )
-                else:
-                    print(f"⏳ {model_name} v{mv.version} remains in Staging.")
-                print()
-                
-                # Success summary
-                print(f"{'='*70}")
-                print(f"Ticker: {ticker}")
-                print(f"Version: v{model_info['version']}")
-                print(f"MLflow Run ID: {mlflow.active_run().info.run_id}")
-                print(f"MLflow Model Version: {mv.version} (Stage: Production)")
-                print(f"{'='*70}\n")
-                
-                return model_info
-                
-            except Exception as e:
-                mlflow.log_param("error", str(e))
-                print(f"\n{'='*70}")
-                print(f" TRAINING FAILED")
-                print(f"{'='*70}")
-                print(f"Error: {str(e)}")
-                import traceback
-                traceback.print_exc()
-                print(f"{'='*70}\n")
-                
-                self._log_error(ticker, str(e))
-                raise
+                    mlflow.log_metrics({
+                        "price_rmse": metrics['rmse'],
+                        "price_mae": metrics['mae'],
+                        "r2_score": metrics['r2'],
+                        "mape": metrics['mape'],
+                        "directional_accuracy": metrics['directional_accuracy']
+                    })
+                except Exception:
+                    pass
+            
+            # Skipping training plots to save storage space
+            print()
+            
+            # Step 6: Save & Register (local registry — always works)
+            model_info = self._save_and_register(
+                ticker, model, scaler, metrics
+            )
+            
+            # Optional: MLflow model registration
+            if HAS_MLFLOW:
+                try:
+                    signature = infer_signature(X_train[:1], y_train[:1])
+                    generic_scaler_path = os.path.join(self.artifacts_dir, 'scaler.pkl')
+                    if os.path.exists(generic_scaler_path):
+                        mlflow.log_artifact(generic_scaler_path, "preprocessing")
+                    if os.path.exists("requirements.txt"):
+                        mlflow.log_artifact("requirements.txt")
+
+                    model_name = f"LSTM_{ticker}"
+                    mlflow.tensorflow.log_model(model, "model", signature=signature)
+                    model_uri = f"runs:/{mlflow.active_run().info.run_id}/model"
+                    mv = mlflow.register_model(model_uri, model_name)
+                    
+                    # Champion vs Challenger logic
+                    client = mlflow.tracking.MlflowClient()
+                    is_prod_ready = True
+                    try:
+                        prod_versions = client.get_latest_versions(model_name, stages=["Production"])
+                        if prod_versions:
+                            champion_run = client.get_run(prod_versions[0].run_id)
+                            champion_mape = champion_run.data.metrics.get("mape", float('inf'))
+                            if metrics['mape'] >= champion_mape:
+                                is_prod_ready = False
+                                client.transition_model_version_stage(model_name, mv.version, "Staging")
+                    except Exception:
+                        pass
+                    
+                    if is_prod_ready:
+                        client.transition_model_version_stage(
+                            name=model_name, version=mv.version,
+                            stage="Production", archive_existing_versions=True
+                        )
+                    
+                    print(f"MLflow: {model_name} v{mv.version} registered")
+                except Exception as mlflow_err:
+                    print(f"⚠️ MLflow registration skipped: {mlflow_err}")
+            
+            # Success summary
+            print(f"{'='*70}")
+            print(f"Ticker: {ticker}")
+            print(f"Version: v{model_info['version']}")
+            if HAS_MLFLOW:
+                try:
+                    print(f"MLflow Run ID: {mlflow.active_run().info.run_id}")
+                except Exception:
+                    pass
+            print(f"{'='*70}\n")
+            
+            return model_info
+            
+        except Exception as e:
+            if HAS_MLFLOW:
+                try:
+                    mlflow.log_param("error", str(e))
+                except Exception:
+                    pass
+            print(f"\n{'='*70}")
+            print(f" TRAINING FAILED")
+            print(f"{'='*70}")
+            print(f"Error: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            print(f"{'='*70}\n")
+            
+            self._log_error(ticker, str(e))
+            raise
+        finally:
+            if mlflow_ctx:
+                try:
+                    mlflow_ctx.__exit__(None, None, None)
+                except Exception:
+                    pass
 
     
     def _ingest_data(self, ticker: str, days: int = 730):

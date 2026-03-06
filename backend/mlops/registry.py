@@ -9,6 +9,14 @@ import shutil
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 
+# Optional MLflow import
+try:
+    import mlflow
+    HAS_MLFLOW = True
+except ImportError:
+    mlflow = None
+    HAS_MLFLOW = False
+
 
 class ModelRegistry:
     """
@@ -17,12 +25,11 @@ class ModelRegistry:
     
     def __init__(self, registry_path: str = 'mlops/model_registry'):
         """
-        Initialize the model registry with MLflow integration
+        Initialize the model registry with optional MLflow integration
         
         Args:
             registry_path: Directory to store model registry data
         """
-        import mlflow
         from mlops.config import MLOpsConfig
         
         self.registry_path = registry_path
@@ -31,9 +38,14 @@ class ModelRegistry:
         self.feature_library_file = os.path.join(registry_path, 'global_features.json')
         self.model_store_path = os.path.join(registry_path, 'model_store')
         
-        # Configure MLflow
-        mlflow.set_tracking_uri(MLOpsConfig.MLFLOW_TRACKING_URI)
-        self.mlflow_client = mlflow.tracking.MlflowClient()
+        # Configure MLflow if available
+        self.mlflow_client = None
+        if HAS_MLFLOW:
+            try:
+                mlflow.set_tracking_uri(MLOpsConfig.MLFLOW_TRACKING_URI)
+                self.mlflow_client = mlflow.tracking.MlflowClient()
+            except Exception:
+                pass
         
         # Create registry & store directories
         os.makedirs(registry_path, exist_ok=True)
@@ -233,11 +245,12 @@ class ModelRegistry:
         Returns:
             Model information dictionary or None if no models found
         """
-        # 1. Try MLflow first
-        mlflow_model = self.get_mlflow_model(ticker, stage="Production")
-        if mlflow_model:
-            print(f"Using MLflow Production model for {ticker}")
-            return mlflow_model
+        # 1. Try MLflow first (only if available)
+        if HAS_MLFLOW and self.mlflow_client:
+            mlflow_model = self.get_mlflow_model(ticker, stage="Production")
+            if mlflow_model:
+                print(f"Using MLflow Production model for {ticker}")
+                return mlflow_model
             
         # 2. Fallback to local
         active_models = [
@@ -280,14 +293,10 @@ class ModelRegistry:
     def get_mlflow_model(self, ticker: str, stage: str = "Production") -> Optional[Dict]:
         """
         Fetch model info from MLflow Model Registry by stage
-        
-        Args:
-            ticker: Stock ticker symbol
-            stage: Model stage ('None', 'Staging', 'Production', 'Archived')
-        
-        Returns:
-            Dictionary with local artifact paths downloaded from MLflow
+        Returns None if MLflow is not available.
         """
+        if not HAS_MLFLOW or not self.mlflow_client:
+            return None
         try:
             model_name = f"LSTM_{ticker}"
             versions = self.mlflow_client.get_latest_versions(model_name, stages=[stage])
