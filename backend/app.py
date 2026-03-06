@@ -401,9 +401,9 @@ def cleanup_expired_cache():
         'files_removed': removed
     })
 
-# Health endpoint — keeps Hugging Face Spaces awake and shows training diagnostics
-@app.route('/api/health')
-def health_check():
+# Training health endpoint — keeps Hugging Face Spaces awake and shows training diagnostics
+@app.route('/api/health/training')
+def training_health_check():
     """Health check with training status — useful for external uptime monitors"""
     try:
         from scheduler import scheduler
