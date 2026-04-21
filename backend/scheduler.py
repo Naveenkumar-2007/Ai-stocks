@@ -8,6 +8,7 @@ import time
 import threading
 import logging
 import sys
+import os
 from datetime import datetime
 
 logging.basicConfig(
@@ -37,8 +38,57 @@ class ModelTrainingScheduler:
         self.thread = None
         self.last_training_time = None
         self.training_results = []
+        self.training_time_utc = os.getenv('DAILY_TRAIN_TIME_UTC', '12:30')
+        self.enable_startup_catchup = os.getenv('ENABLE_STARTUP_CATCHUP', 'true').strip().lower() in ('1', 'true', 'yes', 'on')
         from mlops.config import MLOpsConfig
         self.stocks = MLOpsConfig.get_stocks()
+
+    def _latest_registry_training_date(self):
+        """Return latest model registration date from registry metadata, or None."""
+        import json
+
+        metadata_path = 'mlops/model_registry/metadata.json'
+        if not os.path.exists(metadata_path):
+            return None
+
+        try:
+            with open(metadata_path, 'r', encoding='utf-8') as f:
+                metadata = json.load(f)
+
+            models = metadata.get('models', [])
+            if not models:
+                return None
+
+            timestamps = []
+            for m in models:
+                ts = m.get('registered_at')
+                if not ts:
+                    continue
+                try:
+                    timestamps.append(datetime.fromisoformat(ts).date())
+                except Exception:
+                    continue
+
+            if not timestamps:
+                return None
+            return max(timestamps)
+        except Exception:
+            return None
+
+    def _should_run_startup_catchup(self) -> bool:
+        """Run one catch-up cycle if today's scheduled window has passed and no run happened today."""
+        now = datetime.utcnow()
+        try:
+            hour, minute = [int(x) for x in self.training_time_utc.split(':', 1)]
+        except Exception:
+            hour, minute = 12, 30
+
+        # If app wakes after scheduled time, execute once for today's cycle.
+        if (now.hour, now.minute) < (hour, minute):
+            return False
+
+        latest = self._latest_registry_training_date()
+        return latest != now.date()
     
     def train_models_job(self):
         """Job that runs full model training with rate-limiting for API safety"""
@@ -121,10 +171,17 @@ class ModelTrainingScheduler:
     
     def run_scheduler(self):
         """Run the scheduler loop — trains once daily at 6:00 PM IST (12:30 UTC)"""
-        logger.info("🚀 MLOps Daily Scheduler Started — Training at 18:00 IST (12:30 UTC) every day")
+        logger.info(
+            "🚀 MLOps Daily Scheduler Started — Training at %s UTC every day",
+            self.training_time_utc
+        )
+
+        if self.enable_startup_catchup and self._should_run_startup_catchup():
+            logger.info("⏱️ Startup catch-up triggered: running today's missed training cycle now.")
+            self.train_models_job()
         
         # Schedule exactly once per day at 12:30 UTC = 6:00 PM IST
-        schedule.every().day.at("12:30").do(self.train_models_job)
+        schedule.every().day.at(self.training_time_utc).do(self.train_models_job)
         
         while self.is_running:
             schedule.run_pending()

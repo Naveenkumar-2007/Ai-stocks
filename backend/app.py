@@ -130,7 +130,7 @@ print("=" * 60)
 try:
     from scheduler import scheduler
     scheduler.start()
-    print("✅ Automatic model training started (runs every hour)")
+    print("✅ Automatic model training started (runs daily with startup catch-up)")
 except Exception as e:
     print(f"⚠️ Could not start training scheduler: {e}")
 
