@@ -20,6 +20,18 @@ backend/mlflow.db
 backend/mlruns/
 backend/logs/
 backend/cache/
+backend/monitoring/reports/
+backend/monitoring/tuning/
+backend/data/raw/
+backend/data/processed/
+backend/data/interim/
+backend/.dvc/
+backend/dvc-cache/
+backend/airflow/logs/
+backend/airflow/airflow.db
+backend/airflow/__pycache__/
+backend/mlops_v2/models/
+backend/mlops_v2/__pycache__/
 mlops/checkpoints/
 mlops/logs/
 cache/
@@ -51,5 +63,3 @@ frontend/.env.local
 !backend/mlops/model_registry/model_store/
 !backend/mlops/model_registry/model_store/**/model.h5
 !backend/mlops/model_registry/model_store/**/scaler.pkl
-*.txt
-*.log

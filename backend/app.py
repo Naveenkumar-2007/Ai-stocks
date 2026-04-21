@@ -4,6 +4,7 @@ import os
 from datetime import datetime, timedelta
 import warnings
 import logging
+import threading
 from logging.handlers import RotatingFileHandler
 from functools import wraps
 from werkzeug.exceptions import HTTPException
@@ -68,6 +69,8 @@ _model_cache = {}
 _scaler_cache = {}
 # Per-ticker model metadata cache: { 'AAPL': {'version': '1', 'run_id': 'xyz', 'source': 'mlflow'} }
 _model_metadata = {}
+_training_in_progress = set()
+_training_state_lock = threading.Lock()
 
 SUFFIX_EXCHANGE_COUNTRY = {
     '.NS': ('NSE', 'India'),
@@ -209,6 +212,9 @@ def handle_unexpected_exception(exc: Exception):  # pylint: disable=broad-except
 def load_lstm_model(ticker):
     """Load the pre-trained LSTM model for a specific ticker (per-ticker cache)"""
     global _model_cache, _model_metadata
+    ticker = (ticker or '').strip().upper()
+    if not ticker:
+        return None
     
     # NEW: Register interest in this ticker immediately (adds to stocks.json)
     try:
@@ -260,20 +266,33 @@ def load_lstm_model(ticker):
                 _model_cache[ticker] = loaded_model
                 return loaded_model
             else:
-                # NEW: If model not found, trigger background training for this new ticker
-                print(f"🚀 No model for {ticker}. Triggering background training...")
-                import threading
-                from mlops.training_pipeline import MLOpsTrainingPipeline
-                
+                # If model not found, trigger at most one background training per ticker.
+                with _training_state_lock:
+                    should_start_training = ticker not in _training_in_progress
+                    if should_start_training:
+                        _training_in_progress.add(ticker)
+
+                if not should_start_training:
+                    print(f"⏳ Training already in progress for {ticker}. Skipping duplicate trigger.")
+                else:
+                    print(f"🚀 No model for {ticker}. Triggering background training...")
+                from mlops_v2.training import TrainerV2
+
                 def background_train():
                     try:
-                        pipeline = MLOpsTrainingPipeline()
-                        # Use lower epochs for background jobs to avoid excessive API wait
-                        pipeline.train_model(ticker=ticker, epochs=15)
-                        print(f"✅ Background training and registration completed for {ticker}")
+                        trainer = TrainerV2()
+                        # Force first-time training for unseen symbols discovered from user traffic.
+                        result = trainer.train_if_needed(ticker=ticker, force=True)
+                        if result.trained:
+                            print(f"✅ Background v2 training completed for {ticker}")
+                        else:
+                            print(f"⚠️ Background v2 training skipped for {ticker}: {result.reason}")
                     except Exception as e:
                         print(f"❌ Background training failed for {ticker}: {e}")
-                
+                    finally:
+                        with _training_state_lock:
+                            _training_in_progress.discard(ticker)
+
                 threading.Thread(target=background_train, daemon=True).start()
                 
         except Exception as e:
@@ -417,6 +436,16 @@ def training_health_check():
         })
     except Exception as e:
         return jsonify({'status': 'ok', 'timestamp': datetime.now().isoformat(), 'scheduler_error': str(e)})
+
+
+@app.route('/metrics')
+def prometheus_metrics():
+    """Expose Prometheus metrics for monitoring stack."""
+    try:
+        from prometheus_client import CONTENT_TYPE_LATEST, generate_latest  # type: ignore
+        return generate_latest(), 200, {'Content-Type': CONTENT_TYPE_LATEST}
+    except Exception:
+        return "prometheus_client not installed", 501
 
 # Model Training & Status Endpoints
 
@@ -723,6 +752,13 @@ def get_stock_data(ticker):
                 data_provider or 'primary'
             )
         )
+        # Persist user-demanded symbol so future scheduled runs include it.
+        try:
+            from mlops.config import MLOpsConfig
+            MLOpsConfig.add_stock(resolved_ticker)
+        except Exception as add_exc:
+            print(f"Ticker persistence warning for {resolved_ticker}: {add_exc}")
+
         if provider_message:
             print(f"Provider note: {provider_message}")
 
@@ -1073,6 +1109,36 @@ def get_stock_data(ticker):
         indicators['bollinger_position'] = bb_pos
         indicators['atr'] = safe_float(latest_row.get('ATR')) if 'ATR' in hist.columns else None
         
+        # v2 inference contract (5-day forward return + confidence interval)
+        v2_payload = None
+        try:
+            from mlops_v2.inference import InferenceServiceV2
+            v2_payload = InferenceServiceV2().predict(resolved_ticker)
+        except Exception as _v2_exc:
+            # Fallback to local computation if v2 models are unavailable.
+            five_day_pred = predictions[min(4, len(predictions) - 1)] if predictions else current_price
+            pred_return = ((five_day_pred - current_price) / current_price) if current_price else 0.0
+            direction_prob = 0.5 + max(-0.2, min(0.2, pred_return * 5.0))
+            uncertainty = abs(pred_return) * 0.5 + 0.01
+            try:
+                from mlops_v2.feature_engineering import FEATURE_COLUMNS
+                features_used = FEATURE_COLUMNS
+            except Exception:
+                features_used = []
+
+            v2_payload = {
+                'ticker': resolved_ticker,
+                'prediction': float(pred_return),
+                'lower_95': float(pred_return - 1.96 * uncertainty),
+                'upper_95': float(pred_return + 1.96 * uncertainty),
+                'confidence': float(max(0.0, min(1.0, 1.0 - uncertainty))),
+                'direction_prob': float(max(0.0, min(1.0, direction_prob))),
+                'model_version': (model_info_data.get('version') or 'fallback') if isinstance(model_info_data, dict) else 'fallback',
+                'features_used': features_used,
+                'data_freshness': datetime.utcnow().isoformat() + 'Z',
+                'drift_score': 0.0,
+            }
+
         response = {
             'success': True,
             'ticker': resolved_ticker,
@@ -1104,6 +1170,16 @@ def get_stock_data(ticker):
                 'volumes': volume_data,
                 'moving_averages': ma_data
             },
+            # Required inference contract fields for production API consumers.
+            'prediction': v2_payload['prediction'],
+            'lower_95': v2_payload['lower_95'],
+            'upper_95': v2_payload['upper_95'],
+            'confidence': v2_payload['confidence'],
+            'direction_prob': v2_payload['direction_prob'],
+            'model_version': v2_payload['model_version'],
+            'features_used': v2_payload['features_used'],
+            'data_freshness': v2_payload['data_freshness'],
+            'drift_score': v2_payload['drift_score'],
             'indicator_trends': indicator_trends,
             'performance': performance,
             'performance_chart': performance_chart,

@@ -3,6 +3,9 @@ MLOps Configuration - Centralized configuration management
 """
 
 import os
+import threading
+import re
+from pathlib import Path
 
 
 class MLOpsConfig:
@@ -26,6 +29,17 @@ class MLOpsConfig:
     
     # Scheduler configuration
     TRAINING_INTERVAL_HOURS = 1
+    STOCKS_FILE_LOCK = threading.Lock()
+    _TICKER_PATTERN = re.compile(r"^[A-Z0-9][A-Z0-9.\-]{0,19}$")
+
+    @classmethod
+    def normalize_ticker(cls, ticker: str) -> str:
+        return (ticker or '').strip().upper()
+
+    @classmethod
+    def is_valid_ticker(cls, ticker: str) -> bool:
+        normalized = cls.normalize_ticker(ticker)
+        return bool(normalized and cls._TICKER_PATTERN.match(normalized))
     
     @classmethod
     def get_stocks(cls) -> list:
@@ -34,20 +48,72 @@ class MLOpsConfig:
         path = os.path.join(cls.MLOPS_DIR, 'stocks.json')
         if os.path.exists(path):
             with open(path, 'r') as f:
-                return json.load(f)
+                raw = json.load(f)
+            # Keep insertion order while normalizing and deduplicating.
+            seen = set()
+            out = []
+            for s in raw:
+                symbol = cls.normalize_ticker(str(s))
+                if not symbol or symbol in seen:
+                    continue
+                if not cls.is_valid_ticker(symbol):
+                    continue
+                seen.add(symbol)
+                out.append(symbol)
+            return out
         return [] # Return empty if no registry found
 
     @classmethod
     def add_stock(cls, ticker: str):
         """Append a new stock to the persistent hourly training list"""
         import json
-        stocks = cls.get_stocks()
-        if ticker not in stocks:
-            stocks.append(ticker)
-            path = os.path.join(cls.MLOPS_DIR, 'stocks.json')
-            with open(path, 'w') as f:
-                json.dump(stocks, f, indent=4)
-            print(f"📌 Added {ticker} to automated hourly training list.")
+        normalized = cls.normalize_ticker(ticker)
+        if not cls.is_valid_ticker(normalized):
+            return
+
+        with cls.STOCKS_FILE_LOCK:
+            stocks = cls.get_stocks()
+            if normalized not in stocks:
+                stocks.append(normalized)
+                path = os.path.join(cls.MLOPS_DIR, 'stocks.json')
+                tmp_path = f"{path}.tmp"
+                with open(tmp_path, 'w', encoding='utf-8') as f:
+                    json.dump(stocks, f, indent=4)
+                os.replace(tmp_path, path)
+                print(f"📌 Added {normalized} to automated hourly training list.")
+
+    @classmethod
+    def add_stocks(cls, tickers: list[str]) -> int:
+        """Bulk-add symbols safely; returns number of newly added symbols."""
+        import json
+
+        normalized = []
+        for ticker in tickers or []:
+            symbol = cls.normalize_ticker(str(ticker))
+            if cls.is_valid_ticker(symbol):
+                normalized.append(symbol)
+
+        if not normalized:
+            return 0
+
+        with cls.STOCKS_FILE_LOCK:
+            stocks = cls.get_stocks()
+            seen = set(stocks)
+            added = 0
+            for symbol in normalized:
+                if symbol not in seen:
+                    stocks.append(symbol)
+                    seen.add(symbol)
+                    added += 1
+
+            if added:
+                path = os.path.join(cls.MLOPS_DIR, 'stocks.json')
+                tmp_path = f"{path}.tmp"
+                with open(tmp_path, 'w', encoding='utf-8') as f:
+                    json.dump(stocks, f, indent=4)
+                os.replace(tmp_path, path)
+
+            return added
     
     # Model configuration
     LOOKBACK_PERIOD = 60  # Days
@@ -55,8 +121,8 @@ class MLOpsConfig:
     DROPOUT_RATE = 0.2
     
     # MLflow configuration
-    # Simple "mlruns" folder in the backend directory
-    MLFLOW_TRACKING_URI = "file:mlruns"
+    # Canonical file URI (e.g., file:///C:/.../backend/mlruns) avoids path ambiguity on Windows.
+    MLFLOW_TRACKING_URI = Path(os.path.join(BASE_DIR, 'mlruns')).resolve().as_uri()
     MLFLOW_EXPERIMENT_NAME = "Prediction_Lineage"
     
     # Logging configuration
