@@ -182,7 +182,7 @@ def firebase_auth_required(admin_only: bool = False):
             try:
                 decoded = firebase_auth.verify_id_token(token, check_revoked=True)
             except Exception as exc:  # pylint: disable=broad-except
-                app.logger.info('Invalid or expired token: %s', exc)
+                app.logger.info('Invalid or expired token')
                 return jsonify({'success': False, 'error': 'Invalid or expired token'}), 401
 
             if admin_only and not _user_has_admin_privileges(decoded):

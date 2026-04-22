@@ -19,10 +19,24 @@ done
 
 echo "✅ Environment variables injected successfully"
 
-# Log available API keys (masked) for debugging
-echo "🔑 GROQ_API_KEY: ${GROQ_API_KEY:+SET (${#GROQ_API_KEY} chars)}${GROQ_API_KEY:-NOT SET}"
-echo "🔑 FINNHUB_API_KEY: ${FINNHUB_API_KEY:+SET}${FINNHUB_API_KEY:-NOT SET}"
-echo "🔑 FINNHUB_API_KEYS: ${FINNHUB_API_KEYS:+SET}${FINNHUB_API_KEYS:-NOT SET}"
+# Log key presence only (never print secret values)
+if [ -n "${GROQ_API_KEY:-}" ]; then
+  echo "🔑 GROQ_API_KEY: SET (length=${#GROQ_API_KEY})"
+else
+  echo "🔑 GROQ_API_KEY: NOT SET"
+fi
+
+if [ -n "${FINNHUB_API_KEY:-}" ]; then
+  echo "🔑 FINNHUB_API_KEY: SET"
+else
+  echo "🔑 FINNHUB_API_KEY: NOT SET"
+fi
+
+if [ -n "${FINNHUB_API_KEYS:-}" ]; then
+  echo "🔑 FINNHUB_API_KEYS: SET"
+else
+  echo "🔑 FINNHUB_API_KEYS: NOT SET"
+fi
 
 # Start the chatbot FastAPI server in the background on port 8001
 echo "🤖 Starting chatbot server on port 8001..."
