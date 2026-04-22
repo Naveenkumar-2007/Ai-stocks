@@ -54,8 +54,8 @@ class ModelTrainer:
             callbacks=callbacks
         )
         
-        # Save model
+        # Save model in native Keras format (recommended over legacy HDF5)
         os.makedirs('artifacts', exist_ok=True)
-        self.model.save('artifacts/stock_lstm_model.h5')
+        self.model.save('artifacts/stock_lstm_model.keras')
         
         return self.model, history

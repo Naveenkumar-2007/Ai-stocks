@@ -57,9 +57,10 @@ def _proxy_chatbot(subpath: str):
 # for standard production configuration
 
 # Model will be loaded lazily on first use
-# Check multiple possible model paths (pipeline saves as ticker_lstm_model.h5,
-# component ModelTrainer saves as stock_lstm_model.h5)
+# Check multiple possible model paths; prefer native .keras and keep legacy .h5 fallback.
 MODEL_PATHS = [
+    'artifacts/stock_lstm_model.keras',
+    'artifacts/AAPL_lstm_model.keras',
     'artifacts/stock_lstm_model.h5',
     'artifacts/AAPL_lstm_model.h5',
 ]

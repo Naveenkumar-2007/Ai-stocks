@@ -104,7 +104,7 @@ class ModelRegistry:
         os.makedirs(version_dir, exist_ok=True)
         
         # 1. Save model file
-        model_filename = os.path.join(version_dir, 'model.h5')
+        model_filename = os.path.join(version_dir, 'model.keras')
         shutil.copy(model_path, model_filename)
         
         # 2. Add scaler to UNIFIED LIBRARY (Zero-Clutter)
@@ -311,14 +311,20 @@ class ModelRegistry:
             artifact_local_path = os.path.join(self.registry_path, f"mlflow_{ticker}_{stage}")
             os.makedirs(artifact_local_path, exist_ok=True)
             
-            # Download scaler and model
+            # Download scaler and model (prefer native Keras format, fall back to legacy HDF5)
             self.mlflow_client.download_artifacts(run_id, f"{ticker}_scaler.pkl", artifact_local_path)
-            self.mlflow_client.download_artifacts(run_id, "model/data/model.h5", artifact_local_path)
+            model_local_path = None
+            try:
+                self.mlflow_client.download_artifacts(run_id, "model/data/model.keras", artifact_local_path)
+                model_local_path = os.path.join(artifact_local_path, "model", "data", "model.keras")
+            except Exception:
+                self.mlflow_client.download_artifacts(run_id, "model/data/model.h5", artifact_local_path)
+                model_local_path = os.path.join(artifact_local_path, "model", "data", "model.h5")
             
             return {
                 'ticker': ticker,
                 'version': latest_version.version,
-                'model_path': os.path.join(artifact_local_path, "model", "data", "model.h5"),
+                'model_path': model_local_path,
                 'scaler_path': os.path.join(artifact_local_path, f"{ticker}_scaler.pkl"),
                 'source': 'mlflow'
             }

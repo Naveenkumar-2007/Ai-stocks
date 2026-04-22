@@ -287,7 +287,7 @@ class MLOpsTrainingPipeline:
         # Create callbacks
         checkpoint_path = os.path.join(
             self.checkpoints_dir,
-            f"{ticker}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.h5"
+            f"{ticker}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.keras"
         )
         
         tensorboard_log_dir = os.path.join(
@@ -416,7 +416,7 @@ class MLOpsTrainingPipeline:
     def _save_and_register(self, ticker: str, model, scaler, metrics: Dict) -> Dict:
         """Save model artifacts and register in MLOps registry relying on Unified Storage"""
         # 1. Save model locally for registry ingestion
-        temp_model_path = os.path.join(self.artifacts_dir, f'{ticker}_temp_model.h5')
+        temp_model_path = os.path.join(self.artifacts_dir, f'{ticker}_temp_model.keras')
         model.save(temp_model_path)
         
         # 2. Register in MLOps registry (Handles Unified Scaler Library & model_store)
@@ -437,7 +437,7 @@ class MLOpsTrainingPipeline:
             os.remove(temp_model_path)
         
         # 4. Save generic artifacts for app.py compatibility (Simple overwrite)
-        model.save(os.path.join(self.artifacts_dir, 'stock_lstm_model.h5'))
+        model.save(os.path.join(self.artifacts_dir, 'stock_lstm_model.keras'))
         generic_scaler_path = os.path.join(self.artifacts_dir, 'scaler.pkl')
         with open(generic_scaler_path, 'wb') as f:
             pickle.dump(scaler, f)
