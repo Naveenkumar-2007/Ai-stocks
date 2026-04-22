@@ -119,11 +119,50 @@ class MLOpsConfig:
     LOOKBACK_PERIOD = 60  # Days
     LSTM_UNITS = [50, 50]
     DROPOUT_RATE = 0.2
+
+    @classmethod
+    def _resolve_mlflow_tracking_uri(cls) -> str:
+        """
+        Resolve MLflow tracking URI with priority:
+        1) Explicit MLFLOW_TRACKING_URI
+        2) DagsHub URI from repo owner/name
+        3) Local file store fallback
+        """
+        explicit = (os.getenv('MLFLOW_TRACKING_URI') or '').strip()
+        if explicit:
+            return explicit
+
+        dagshub_uri = (os.getenv('DAGSHUB_MLFLOW_URI') or '').strip()
+        if dagshub_uri:
+            return dagshub_uri
+
+        owner = (os.getenv('DAGSHUB_REPO_OWNER') or '').strip()
+        repo = (os.getenv('DAGSHUB_REPO_NAME') or '').strip()
+        if owner and repo:
+            return f"https://dagshub.com/{owner}/{repo}.mlflow"
+
+        return Path(os.path.join(cls.BASE_DIR, 'mlruns')).resolve().as_uri()
+
+    @classmethod
+    def configure_mlflow_env(cls) -> None:
+        """Configure MLflow auth env vars for DagsHub when token is provided."""
+        token = (os.getenv('DAGSHUB_TOKEN') or '').strip()
+        if not token:
+            return
+
+        owner = (os.getenv('DAGSHUB_REPO_OWNER') or '').strip()
+        username = (os.getenv('DAGSHUB_USERNAME') or owner or '').strip()
+
+        # Respect explicitly configured MLflow credentials if already set.
+        if username and not os.getenv('MLFLOW_TRACKING_USERNAME'):
+            os.environ['MLFLOW_TRACKING_USERNAME'] = username
+        if not os.getenv('MLFLOW_TRACKING_PASSWORD'):
+            os.environ['MLFLOW_TRACKING_PASSWORD'] = token
     
     # MLflow configuration
-    # Canonical file URI (e.g., file:///C:/.../backend/mlruns) avoids path ambiguity on Windows.
-    MLFLOW_TRACKING_URI = Path(os.path.join(BASE_DIR, 'mlruns')).resolve().as_uri()
-    MLFLOW_EXPERIMENT_NAME = "Prediction_Lineage"
+    # DagsHub-ready with local fallback (resolved after class definition).
+    MLFLOW_TRACKING_URI = ""
+    MLFLOW_EXPERIMENT_NAME = os.getenv('MLFLOW_EXPERIMENT_NAME', 'Prediction_Lineage')
     
     # Logging configuration
     LOG_FORMAT = '[%(asctime)s] %(levelname)s: %(message)s'
@@ -144,3 +183,5 @@ class MLOpsConfig:
 
 # Initialize directories on import
 MLOpsConfig.ensure_directories()
+MLOpsConfig.configure_mlflow_env()
+MLOpsConfig.MLFLOW_TRACKING_URI = MLOpsConfig._resolve_mlflow_tracking_uri()
