@@ -1,6 +1,6 @@
 """
 Automatic Model Training Scheduler
-Runs BOTH LSTM and sklearn ensemble training every hour in the background.
+Runs scheduled model training in the background.
 """
 
 import schedule
@@ -38,7 +38,9 @@ class ModelTrainingScheduler:
         self.thread = None
         self.last_training_time = None
         self.training_results = []
-        self.training_time_utc = os.getenv('DAILY_TRAIN_TIME_UTC', '12:30')
+        # Match Airflow DAG default schedule: 22:30 UTC on weekdays.
+        self.training_time_utc = os.getenv('DAILY_TRAIN_TIME_UTC', '22:30')
+        self.weekdays_only = os.getenv('TRAIN_WEEKDAYS_ONLY', 'true').strip().lower() in ('1', 'true', 'yes', 'on')
         self.enable_startup_catchup = os.getenv('ENABLE_STARTUP_CATCHUP', 'true').strip().lower() in ('1', 'true', 'yes', 'on')
         from mlops.config import MLOpsConfig
         self.stocks = MLOpsConfig.get_stocks()
@@ -78,10 +80,14 @@ class ModelTrainingScheduler:
     def _should_run_startup_catchup(self) -> bool:
         """Run one catch-up cycle if today's scheduled window has passed and no run happened today."""
         now = datetime.utcnow()
+
+        if self.weekdays_only and now.weekday() >= 5:
+            return False
+
         try:
             hour, minute = [int(x) for x in self.training_time_utc.split(':', 1)]
         except Exception:
-            hour, minute = 12, 30
+            hour, minute = 22, 30
 
         # If app wakes after scheduled time, execute once for today's cycle.
         if (now.hour, now.minute) < (hour, minute):
@@ -170,18 +176,26 @@ class ModelTrainingScheduler:
             logger.error(f"❌ [MLOps] Critical error in scheduler job: {e}")
     
     def run_scheduler(self):
-        """Run the scheduler loop — trains once daily at 6:00 PM IST (12:30 UTC)"""
+        """Run the scheduler loop with Airflow-aligned default timing."""
         logger.info(
-            "🚀 MLOps Daily Scheduler Started — Training at %s UTC every day",
-            self.training_time_utc
+            "🚀 MLOps Scheduler Started — Training at %s UTC (%s)",
+            self.training_time_utc,
+            "weekdays" if self.weekdays_only else "daily"
         )
 
         if self.enable_startup_catchup and self._should_run_startup_catchup():
             logger.info("⏱️ Startup catch-up triggered: running today's missed training cycle now.")
             self.train_models_job()
         
-        # Schedule exactly once per day at 12:30 UTC = 6:00 PM IST
-        schedule.every().day.at(self.training_time_utc).do(self.train_models_job)
+        # Keep default behavior aligned with Airflow DAG: weekdays at configured UTC time.
+        if self.weekdays_only:
+            schedule.every().monday.at(self.training_time_utc).do(self.train_models_job)
+            schedule.every().tuesday.at(self.training_time_utc).do(self.train_models_job)
+            schedule.every().wednesday.at(self.training_time_utc).do(self.train_models_job)
+            schedule.every().thursday.at(self.training_time_utc).do(self.train_models_job)
+            schedule.every().friday.at(self.training_time_utc).do(self.train_models_job)
+        else:
+            schedule.every().day.at(self.training_time_utc).do(self.train_models_job)
         
         while self.is_running:
             schedule.run_pending()
