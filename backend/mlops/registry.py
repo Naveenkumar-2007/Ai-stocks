@@ -42,6 +42,7 @@ class ModelRegistry:
         self.mlflow_client = None
         if HAS_MLFLOW:
             try:
+                os.environ['MLFLOW_HTTP_REQUEST_TIMEOUT'] = '5'
                 mlflow.set_tracking_uri(MLOpsConfig.MLFLOW_TRACKING_URI)
                 self.mlflow_client = mlflow.tracking.MlflowClient()
             except Exception:

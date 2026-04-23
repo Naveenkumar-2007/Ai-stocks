@@ -423,9 +423,9 @@ function Prediction() {
     setError(null);
     try {
       const [stockRes, sentimentRes, newsRes] = await Promise.all([
-        axios.get(`${API_BASE}/api/stock/${symbol}?days=${days}`),
-        axios.get(`${API_BASE}/api/sentiment/${symbol}`).catch(() => ({ data: { sentiment: null } })),
-        axios.get(`${API_BASE}/api/news/${symbol}?days=7`).catch(() => ({ data: { news: [] } }))
+        axios.get(`${API_BASE}/api/stock/${symbol}?days=${days}`, { timeout: 45000 }),
+        axios.get(`${API_BASE}/api/sentiment/${symbol}`, { timeout: 15000 }).catch(() => ({ data: { sentiment: null } })),
+        axios.get(`${API_BASE}/api/news/${symbol}?days=7`, { timeout: 15000 }).catch(() => ({ data: { news: [] } }))
       ]);
 
       const payload = stockRes.data;
