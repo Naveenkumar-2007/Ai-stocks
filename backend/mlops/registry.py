@@ -303,13 +303,15 @@ class ModelRegistry:
             import concurrent.futures
             
             # Strict timeout for MLflow API call to prevent Hugging Face Space hang
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                future = executor.submit(self.mlflow_client.get_latest_versions, model_name, stages=[stage])
-                try:
-                    versions = future.result(timeout=4.0)
-                except concurrent.futures.TimeoutError:
-                    print(f"MLflow API timed out for {ticker}")
-                    return None
+            executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+            future = executor.submit(self.mlflow_client.get_latest_versions, model_name, stages=[stage])
+            try:
+                versions = future.result(timeout=4.0)
+                executor.shutdown(wait=False)
+            except concurrent.futures.TimeoutError:
+                print(f"MLflow API timed out for {ticker}")
+                executor.shutdown(wait=False, cancel_futures=True)
+                return None
             
             if not versions:
                 return None
