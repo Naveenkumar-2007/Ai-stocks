@@ -8,7 +8,7 @@ import {
 } from 'recharts';
 import { useAuth } from '../contexts/AuthContext';
 
-const API_BASE = process.env.NODE_ENV === 'production' ? '' : 'http://localhost:8000';
+const API_BASE = process.env.REACT_APP_API_URL || (process.env.NODE_ENV === 'production' ? '' : 'http://localhost:8000');
 
 // Helper function to track user stats
 const trackUserStats = (userEmail, ticker) => {
@@ -462,7 +462,7 @@ function Prediction() {
         trackUserStats(currentUser.email, payload?.ticker || symbol);
       }
     } catch (err) {
-      setError(err.response?.data?.error || (err.request ? 'Backend unreachable. Please ensure the backend is running on port 8000.' : 'Failed to fetch data'));
+      setError(err.response?.data?.error || (err.request ? 'Backend unreachable or request timed out. Please try again in a few seconds.' : 'Failed to fetch data'));
       console.error(err);
     } finally {
       setLoading(false);
