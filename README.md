@@ -1,6 +1,6 @@
 # 📈 AI Stock Predictor & Quantitative MLOps Platform
 
-![AI Pipeline Architecture](file:///C:/Users/navee/.gemini/antigravity/brain/ff3d9b82-dc37-4c38-b777-a5f886d3d190/ai_pipeline_with_tools_1776946079140.png)
+![AI Pipeline Architecture](file:///C:/Users/navee/.gemini/antigravity/brain/ff3d9b82-dc37-4c38-b777-a5f886d3d190/ai_pipeline_with_all_logos_1776946959758.png)
 
 ![GitHub License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Python Version](https://img.shields.io/badge/python-3.10%2B-blue)
