@@ -1,4 +1,4 @@
-"""
+﻿"""
 Stock Data API Module using Twelve Data and Alpha Vantage
 Provides reliable stock data access from cloud hosting
 WITH INTELLIGENT CACHING TO MINIMIZE API CALLS
@@ -36,7 +36,7 @@ except ImportError:  # pragma: no cover - handled gracefully at runtime
 load_dotenv()
 
 
-# ── API Key Rotator ──────────────────────────────────────────────
+# â”€â”€ API Key Rotator â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 import threading
 
 class KeyRotator:
@@ -48,7 +48,7 @@ class KeyRotator:
             raise RuntimeError(f"No API keys configured for {name}. Update your .env file.")
         self._idx = 0
         self._lock = threading.Lock()
-        logger.info(f"🔑 {name}: loaded {len(self.keys)} API key(s)")
+        logger.info(f"ðŸ”‘ {name}: loaded {len(self.keys)} API key(s)")
 
     @property
     def key(self) -> str:
@@ -63,7 +63,7 @@ class KeyRotator:
                 return self.keys[self._idx % len(self.keys)]  # already rotated
             self._idx += 1
             new_key = self.keys[self._idx % len(self.keys)]
-            logger.info(f"🔄 {self.name}: rotated to key #{(self._idx % len(self.keys)) + 1}/{len(self.keys)}")
+            logger.info(f"ðŸ”„ {self.name}: rotated to key #{(self._idx % len(self.keys)) + 1}/{len(self.keys)}")
             return new_key
 
     def __len__(self):
@@ -144,7 +144,7 @@ COUNTRY_SUFFIX_FALLBACKS = {
 DEFAULT_SUFFIX_FALLBACKS = ['.NS', '.BO', '.L', '.HK', '.TO']
 
 
-# ── Dynamic key getters (always return the currently active key) ──
+# â”€â”€ Dynamic key getters (always return the currently active key) â”€â”€
 def _get_twelve_key():
     return twelve_data_rotator.key
 
@@ -172,7 +172,7 @@ def _request_with_rotation(rotator, url, params, apikey_param='apikey', timeout=
 
             # HTTP 429 = rate limited
             if response.status_code == 429:
-                logger.warning(f"⚠️ {rotator.name}: rate limited (429), rotating key...")
+                logger.warning(f"âš ï¸ {rotator.name}: rate limited (429), rotating key...")
                 rotator.rotate(current_key)
                 continue
 
@@ -182,7 +182,7 @@ def _request_with_rotation(rotator, url, params, apikey_param='apikey', timeout=
                     body = response.json()
                     msg = str(body.get('message', '') or body.get('error', '') or body.get('note', '')).lower()
                     if any(w in msg for w in ['rate limit', 'api limit', 'too many', 'exceeded', 'throttl']):
-                        logger.warning(f"⚠️ {rotator.name}: API rate-limit in response body, rotating key...")
+                        logger.warning(f"âš ï¸ {rotator.name}: API rate-limit in response body, rotating key...")
                         rotator.rotate(current_key)
                         continue
                 except (ValueError, AttributeError):
@@ -404,7 +404,7 @@ def get_stock_history(
     provider_error = None
 
     try:
-        print(f"📊 Fetching {ticker} data from Twelve Data API...")
+        print(f"ðŸ“Š Fetching {ticker} data from Twelve Data API...")
 
         url = f'{BASE_URL}/time_series'
         params = {
@@ -421,10 +421,10 @@ def get_stock_history(
 
         if payload.get('status') == 'error':
             provider_error = payload.get('message', 'Unknown error')
-            print(f"❌ API Error: {provider_error}")
+            print(f"âŒ API Error: {provider_error}")
         elif 'values' not in payload:
             provider_error = 'No data returned from Twelve Data'
-            print(f"❌ No data returned for {ticker}")
+            print(f"âŒ No data returned for {ticker}")
         else:
             data_frame = pd.DataFrame(payload['values'])
             data_frame['datetime'] = pd.to_datetime(data_frame['datetime'])
@@ -446,13 +446,13 @@ def get_stock_history(
             data_frame['Dividends'] = 0.0
             data_frame['Stock Splits'] = 0.0
 
-            print(f"✅ Successfully fetched {len(data_frame)} data points for {ticker}")
+            print(f"âœ… Successfully fetched {len(data_frame)} data points for {ticker}")
             if not data_frame.empty:
                 print(
-                    f"📅 Date range: {data_frame.index[0].strftime('%Y-%m-%d')} "
+                    f"ðŸ“… Date range: {data_frame.index[0].strftime('%Y-%m-%d')} "
                     f"to {data_frame.index[-1].strftime('%Y-%m-%d')}"
                 )
-                print(f"💵 Latest price: ${data_frame['Close'].iloc[-1]:.2f}")
+                print(f"ðŸ’µ Latest price: ${data_frame['Close'].iloc[-1]:.2f}")
                 
                 # Cache the successful result
                 cache_entry = {
@@ -460,7 +460,7 @@ def get_stock_history(
                     'info': info
                 }
                 cache.set('stock_history', cache_params, cache_entry)
-                print(f"💾 Cached data for {ticker}")
+                print(f"ðŸ’¾ Cached data for {ticker}")
 
     except requests.exceptions.RequestException as exc:
         provider_error = f'Network error fetching {ticker}: {exc}'
@@ -475,7 +475,7 @@ def get_stock_history(
 
     # FIRST FALLBACK: Try Finnhub API (with key rotation)
     if needs_fallback and allow_fallback and finnhub_rotator:
-        logger.info(f"🔄 Trying Finnhub fallback for {ticker}...")
+        logger.info(f"ðŸ”„ Trying Finnhub fallback for {ticker}...")
         print(f"Twelve Data unavailable for {ticker}, trying Finnhub...")
         
         try:
@@ -483,7 +483,7 @@ def get_stock_history(
             end_date = datetime.now()
             start_date = end_date - timedelta(days=days + 30)
             
-            # Finnhub candle endpoint — use key rotation
+            # Finnhub candle endpoint â€” use key rotation
             finnhub_url = f"{FINNHUB_BASE_URL}/stock/candle"
             params = {
                 'symbol': ticker.upper(),
@@ -526,8 +526,8 @@ def get_stock_history(
                     info['source'] = 'finnhub'
                     needs_fallback = False
                     
-                    logger.info(f"✅ Finnhub: Successfully fetched {len(data_frame)} data points for {ticker}")
-                    print(f"✅ Finnhub: Successfully fetched {len(data_frame)} data points for {ticker}")
+                    logger.info(f"âœ… Finnhub: Successfully fetched {len(data_frame)} data points for {ticker}")
+                    print(f"âœ… Finnhub: Successfully fetched {len(data_frame)} data points for {ticker}")
                     
                     # Cache the successful result
                     cache_entry = {
@@ -535,18 +535,18 @@ def get_stock_history(
                         'info': info
                     }
                     cache.set('stock_history', cache_params, cache_entry)
-                    print(f"💾 Cached Finnhub data for {ticker}")
+                    print(f"ðŸ’¾ Cached Finnhub data for {ticker}")
             else:
                 error_msg = finnhub_data.get('error', 'No data available')
                 print(f"  Finnhub: {error_msg}")
                 
         except Exception as e:
-            logger.error(f"❌ Finnhub error for {ticker}: {str(e)}")
+            logger.error(f"âŒ Finnhub error for {ticker}: {str(e)}")
             print(f"  Finnhub error: {str(e)}")
 
     # SECOND FALLBACK: Try Alpha Vantage API (with key rotation)
     if needs_fallback and allow_fallback and alpha_vantage_rotator:
-        logger.info(f"🔄 Trying Alpha Vantage fallback for {ticker}...")
+        logger.info(f"ðŸ”„ Trying Alpha Vantage fallback for {ticker}...")
         print(f"Finnhub unavailable for {ticker}, trying Alpha Vantage as last resort...")
         
         try:
@@ -596,8 +596,8 @@ def get_stock_history(
                     info['source'] = 'alphavantage'
                     needs_fallback = False
                     
-                    logger.info(f"✅ Alpha Vantage: Successfully fetched {len(data_frame)} data points for {ticker}")
-                    print(f"✅ Alpha Vantage: Successfully fetched {len(data_frame)} data points for {ticker}")
+                    logger.info(f"âœ… Alpha Vantage: Successfully fetched {len(data_frame)} data points for {ticker}")
+                    print(f"âœ… Alpha Vantage: Successfully fetched {len(data_frame)} data points for {ticker}")
                     
                     # Cache the successful result
                     cache_entry = {
@@ -605,7 +605,7 @@ def get_stock_history(
                         'info': info
                     }
                     cache.set('stock_history', cache_params, cache_entry)
-                    print(f"💾 Cached Alpha Vantage data for {ticker}")
+                    print(f"ðŸ’¾ Cached Alpha Vantage data for {ticker}")
                     
             else:
                 error_msg = av_data.get('Note') or av_data.get('Error Message')
@@ -613,12 +613,12 @@ def get_stock_history(
                     print(f"  Alpha Vantage: {error_msg}")
                 
         except Exception as e:
-            logger.error(f"❌ Alpha Vantage error for {ticker}: {str(e)}")
+            logger.error(f"âŒ Alpha Vantage error for {ticker}: {str(e)}")
             print(f"  Alpha Vantage error: {str(e)}")
     
     # THIRD FALLBACK: Try Yahoo Finance (Strongest for international/NSE stocks)
     if needs_fallback and allow_fallback:
-        logger.info(f"🔄 Trying Yahoo Finance fallback for {ticker}...")
+        logger.info(f"ðŸ”„ Trying Yahoo Finance fallback for {ticker}...")
         print(f"Previous providers failed for {ticker}, trying Yahoo Finance...")
         
         try:
@@ -632,8 +632,8 @@ def get_stock_history(
                 info['symbol'] = yf_symbol
                 needs_fallback = False
                 
-                logger.info(f"✅ Yahoo Finance: Successfully fetched {len(data_frame)} data points for {yf_symbol}")
-                print(f"✅ Yahoo Finance: Successfully fetched {len(data_frame)} data points for {yf_symbol}")
+                logger.info(f"âœ… Yahoo Finance: Successfully fetched {len(data_frame)} data points for {yf_symbol}")
+                print(f"âœ… Yahoo Finance: Successfully fetched {len(data_frame)} data points for {yf_symbol}")
                 
                 # Cache the successful result
                 cache_entry = {
@@ -641,12 +641,12 @@ def get_stock_history(
                     'info': info
                 }
                 cache.set('stock_history', cache_params, cache_entry)
-                print(f"💾 Cached Yahoo Finance data for {ticker}")
+                print(f"ðŸ’¾ Cached Yahoo Finance data for {ticker}")
             else:
-                logger.warning(f"❌ Yahoo Finance failed for {ticker}: {yf_error}")
+                logger.warning(f"âŒ Yahoo Finance failed for {ticker}: {yf_error}")
                 print(f"  Yahoo Finance error: {yf_error}")
         except Exception as e:
-            logger.error(f"❌ Yahoo Finance critical error for {ticker}: {str(e)}")
+            logger.error(f"âŒ Yahoo Finance critical error for {ticker}: {str(e)}")
             print(f"  Yahoo Finance critical error: {str(e)}")
 
     if needs_fallback:
@@ -661,7 +661,7 @@ def get_stock_history(
                 data_frame = df
                 info['source'] = 'cache-stale'
                 info['provider_message'] = f"Using cached data for {ticker} (APIs temporarily unavailable)"
-                print(f"⚠️ Using stale cached data for {ticker} - APIs exhausted")
+                print(f"âš ï¸ Using stale cached data for {ticker} - APIs exhausted")
                 needs_fallback = False
         
         # If still no data, provide user-friendly error
@@ -943,11 +943,11 @@ def get_company_news(ticker, days=7):
     cache_params = {'ticker': ticker, 'days': days}
     cached_news = cache.get('company_news', cache_params, ttl_seconds=7200)  # 2 hour cache
     if cached_news:
-        print(f"💾 Using cached news for {ticker}")
+        print(f"ðŸ’¾ Using cached news for {ticker}")
         return cached_news
     
     try:
-        print(f"📰 Fetching news for {ticker} from Finnhub API only...")
+        print(f"ðŸ“° Fetching news for {ticker} from Finnhub API only...")
         
         # Get company profile to get company name AND logo
         company_name = None
@@ -955,7 +955,7 @@ def get_company_news(ticker, days=7):
         try:
             profile_url = f'{FINNHUB_BASE_URL}/stock/profile2'
             profile_params = {'symbol': ticker, 'token': _get_finnhub_key()}
-            profile_response = requests.get(profile_url, params=profile_params, timeout=10)
+            profile_response = requests.get(profile_url, params=profile_params, timeout=3)
             if profile_response.status_code == 200:
                 profile_data = profile_response.json()
                 company_name = profile_data.get('name', '').lower()
@@ -1049,13 +1049,13 @@ def get_company_news(ticker, days=7):
             if len(news_articles) >= 30:
                 break
         
-        print(f"✅ Fetched {len(news_articles)} relevant news articles for {ticker} from Finnhub only")
+        print(f"âœ… Fetched {len(news_articles)} relevant news articles for {ticker} from Finnhub only")
         print(f"All articles using company logo: {company_logo}")
         print(f"All data from Finnhub API - No Yahoo Finance used")
         
         # Cache the results (2 hour TTL)
         cache.set('company_news', cache_params, news_articles)
-        print(f"💾 Cached news for {ticker}")
+        print(f"ðŸ’¾ Cached news for {ticker}")
         
         return news_articles
         
@@ -1080,11 +1080,11 @@ def get_sentiment_analysis(ticker):
     cache_params = {'ticker': ticker}
     cached_sentiment = cache.get('sentiment_analysis', cache_params, ttl_seconds=14400)  # 4 hour cache
     if cached_sentiment:
-        print(f"💾 Using cached sentiment for {ticker}")
+        print(f"ðŸ’¾ Using cached sentiment for {ticker}")
         return cached_sentiment
     
     try:
-        print(f"🎯 Fetching sentiment analysis for {ticker} from Finnhub...")
+        print(f"ðŸŽ¯ Fetching sentiment analysis for {ticker} from Finnhub...")
         
         # Get news sentiment
         url = f'{FINNHUB_BASE_URL}/news-sentiment'
@@ -1093,7 +1093,7 @@ def get_sentiment_analysis(ticker):
             'token': _get_finnhub_key()
         }
         
-        response = requests.get(url, params=params, timeout=10)
+        response = requests.get(url, params=params, timeout=3)
         
         # If news-sentiment not available, analyze company news
         if response.status_code != 200 or not response.json():
@@ -1149,11 +1149,11 @@ def get_sentiment_analysis(ticker):
             'buzz_score': buzz.get('buzz', 0)
         }
         
-        print(f"✅ Sentiment: {sentiment_label} (Score: {overall_score:.2f}, Bull: {bullish_display}%, Bear: {bearish_display}%)")
+        print(f"âœ… Sentiment: {sentiment_label} (Score: {overall_score:.2f}, Bull: {bullish_display}%, Bear: {bearish_display}%)")
         
         # Cache the result (4 hour TTL)
         cache.set('sentiment_analysis', cache_params, result)
-        print(f"💾 Cached sentiment for {ticker}")
+        print(f"ðŸ’¾ Cached sentiment for {ticker}")
         
         return result
         
@@ -1225,7 +1225,7 @@ def calculate_sentiment_from_news(ticker):
             headline_lower = article.get('headline', '').lower()
             summary_lower = article.get('summary', '').lower()
             
-            # Count matches — headlines weighted 2x more than summaries
+            # Count matches â€” headlines weighted 2x more than summaries
             headline_pos = sum(1 for kw in positive_keywords if kw in headline_lower)
             headline_neg = sum(1 for kw in negative_keywords if kw in headline_lower)
             summary_pos = sum(1 for kw in positive_keywords if kw in summary_lower)
@@ -1242,7 +1242,7 @@ def calculate_sentiment_from_news(ticker):
             # Articles with no keyword matches are skipped (not neutral)
         
         if not article_scores:
-            # No keyword matches at all — return neutral with article count
+            # No keyword matches at all â€” return neutral with article count
             return {
                 'sentiment': 'NEUTRAL',
                 'sentiment_class': 'neutral',
@@ -1253,7 +1253,7 @@ def calculate_sentiment_from_news(ticker):
                 'buzz_score': min(len(news) / 10, 1.0)
             }
         
-        # Average article scores — this naturally produces -1..+1 range
+        # Average article scores â€” this naturally produces -1..+1 range
         score = sum(article_scores) / len(article_scores)
         
         # Convert to percentages for display
@@ -1277,7 +1277,7 @@ def calculate_sentiment_from_news(ticker):
             sentiment_label = 'STRONG SELL'
             sentiment_class = 'negative'
         
-        print(f"📊 News Sentiment ({len(article_scores)}/{len(news)} articles scored): {sentiment_label} (Score: {score:.2f})")
+        print(f"ðŸ“Š News Sentiment ({len(article_scores)}/{len(news)} articles scored): {sentiment_label} (Score: {score:.2f})")
         
         result = {
             'sentiment': sentiment_label,
@@ -1327,7 +1327,7 @@ def get_quote_data(ticker):
             'token': _get_finnhub_key()
         }
         
-        response = requests.get(url, params=params, timeout=10)
+        response = requests.get(url, params=params, timeout=3)
         response.raise_for_status()
         quote = response.json()
         
@@ -1374,7 +1374,7 @@ def get_company_profile(ticker):
             'token': _get_finnhub_key()
         }
         
-        response = requests.get(url, params=params, timeout=10)
+        response = requests.get(url, params=params, timeout=3)
         response.raise_for_status()
         profile = response.json()
         
@@ -1400,12 +1400,12 @@ def get_company_profile(ticker):
                         if val:
                             td_mcap = float(val)
                             # Twelve Data returns market cap in raw USD (e.g. 3.5T for AAPL)
-                            # Sanity check: if value < 1000, it's likely in billions — multiply
+                            # Sanity check: if value < 1000, it's likely in billions â€” multiply
                             if td_mcap < 1000:
                                 td_mcap = td_mcap * 1_000_000_000  # Convert billions to raw
                                 print(f"  Twelve Data value looks like billions, normalized: {td_mcap}")
                             market_cap = td_mcap
-                            print(f"✅ Found Market Cap in Twelve Data: {market_cap}")
+                            print(f"âœ… Found Market Cap in Twelve Data: {market_cap}")
             except Exception as e:
                 print(f"Twelve Data fallback failed: {e}")
 
@@ -1421,7 +1421,7 @@ def get_company_profile(ticker):
                     val = m_data.get('marketCapitalization')
                     if val:
                         market_cap = float(val) * 1_000_000
-                        print(f"✅ Found Market Cap in Finnhub Metrics: {market_cap}")
+                        print(f"âœ… Found Market Cap in Finnhub Metrics: {market_cap}")
             except Exception as e:
                 print(f"Finnhub metrics fallback failed: {e}")
 

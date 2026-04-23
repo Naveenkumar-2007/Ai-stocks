@@ -298,32 +298,19 @@ class ModelRegistry:
         """
         if not HAS_MLFLOW or not self.mlflow_client:
             return None
-        try:
+            
+        def _fetch():
             model_name = f"LSTM_{ticker}"
-            import concurrent.futures
-            
-            # Strict timeout for MLflow API call to prevent Hugging Face Space hang
-            executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-            future = executor.submit(self.mlflow_client.get_latest_versions, model_name, stages=[stage])
-            try:
-                versions = future.result(timeout=4.0)
-                executor.shutdown(wait=False)
-            except concurrent.futures.TimeoutError:
-                print(f"MLflow API timed out for {ticker}")
-                executor.shutdown(wait=False, cancel_futures=True)
-                return None
-            
+            versions = self.mlflow_client.get_latest_versions(model_name, stages=[stage])
             if not versions:
                 return None
                 
             latest_version = versions[0]
             run_id = latest_version.run_id
             
-            # Download artifacts locally if not already there
             artifact_local_path = os.path.join(self.registry_path, f"mlflow_{ticker}_{stage}")
             os.makedirs(artifact_local_path, exist_ok=True)
             
-            # Download scaler and model (prefer native Keras format, fall back to legacy HDF5)
             self.mlflow_client.download_artifacts(run_id, f"{ticker}_scaler.pkl", artifact_local_path)
             model_local_path = None
             try:
@@ -340,8 +327,21 @@ class ModelRegistry:
                 'scaler_path': os.path.join(artifact_local_path, f"{ticker}_scaler.pkl"),
                 'source': 'mlflow'
             }
+            
+        try:
+            import concurrent.futures
+            executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+            future = executor.submit(_fetch)
+            try:
+                result = future.result(timeout=4.0)
+                executor.shutdown(wait=False)
+                return result
+            except concurrent.futures.TimeoutError:
+                print(f"MLflow API fully timed out for {ticker} (including downloads)")
+                executor.shutdown(wait=False, cancel_futures=True)
+                return None
         except Exception as e:
-            print(f"MLflow model fetch failed for {ticker}: {e}")
+            print(f"MLflow fetch error: {e}")
             return None
     
     def list_models(self, ticker: Optional[str] = None, status: str = 'active') -> List[Dict]:
