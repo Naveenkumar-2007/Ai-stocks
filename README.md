@@ -20,7 +20,7 @@ The system is engineered for maximum efficiency. It ensures the user never exper
 ### 1. The First Time a Stock is Searched (On-Demand Catch-up)
 When a user types a brand-new stock (e.g., `NVDA`) into the search bar:
 - **Instant Fallback**: The model doesn't exist yet. Instead of crashing, the system instantly calculates and displays a **Technical Analysis** fallback (Moving Averages, RSI, MACD). This gives the user immediate, math-based financial data.
-- **Hidden Background Training**: At the exact same millisecond, the backend locks the ticker and spins up an isolated background thread. It fetches historical data from Yahoo Finance and begins training the deep learning models for that specific stock.
+- **Hidden Background Training**: At the exact same millisecond, the backend locks the ticker and spins up an isolated background thread. It fetches historical data from Twelve Data (or Alpha Vantage) and begins training the deep learning models for that specific stock.
 - **The Swap**: ~2 minutes later, if the user refreshes the page, the Technical Analysis chart is instantly replaced with the fully-trained, highly accurate AI prediction!
 
 ### 2. The Next Training (The 4:00 AM Nightly Batch)
@@ -77,7 +77,7 @@ graph TD
     Lock -- No --> Training[⚙️ Background Trainer V1/V2]
     
     %% Training Pipeline
-    Training:::backend -->|Fetch Historical| YFinance[(Yahoo Finance)]
+    Training:::backend -->|Fetch Historical| TwelveData[(Twelve Data API)]
     Training -->|Log Metrics| Registry[(MLflow / DagsHub)]
     Training -->|Save Checkpoint| Disk[(Local Storage)]
     
@@ -96,7 +96,7 @@ graph TD
     %% Apply loose classes
     Registry:::registry
     Grafana:::monitor
-    YFinance:::data
+    TwelveData:::data
 ```
 
 ---
