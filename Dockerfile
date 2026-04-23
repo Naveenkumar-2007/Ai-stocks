@@ -20,12 +20,16 @@ RUN npm run build
 FROM python:3.10-slim
 WORKDIR /app
 
-# Install system dependencies
+# Install system dependencies and Prometheus
 RUN apt-get update && apt-get install -y \
     build-essential \
     curl \
     git \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* && \
+    curl -LO https://github.com/prometheus/prometheus/releases/download/v2.54.1/prometheus-2.54.1.linux-amd64.tar.gz && \
+    tar xvf prometheus-2.54.1.linux-amd64.tar.gz && \
+    cp prometheus-2.54.1.linux-amd64/prometheus /usr/local/bin/ && \
+    rm -rf prometheus-*
 
 # Copy backend requirements and install
 COPY backend/requirements.txt ./

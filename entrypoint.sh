@@ -60,6 +60,34 @@ for i in $(seq 1 10); do
   sleep 2
 done
 
+# Start Prometheus Agent if Grafana Cloud secrets are present
+if [ -n "${GRAFANA_URL:-}" ] && [ -n "${GRAFANA_USER:-}" ] && [ -n "${GRAFANA_TOKEN:-}" ]; then
+  echo "📊 Setting up Prometheus remote write to Grafana Cloud..."
+  
+  cat <<EOF > /app/prometheus.yml
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: 'hf-space'
+    static_configs:
+      - targets: ['127.0.0.1:7860']
+
+remote_write:
+  - url: "${GRAFANA_URL}"
+    basic_auth:
+      username: "${GRAFANA_USER}"
+      password: "${GRAFANA_TOKEN}"
+EOF
+
+  echo "🚀 Starting Prometheus agent in background..."
+  # Run in agent mode to save memory (forwards data directly, doesn't store locally)
+  prometheus --config.file=/app/prometheus.yml --storage.agent.path=/app/data-agent --enable-feature=agent &
+  PROMETHEUS_PID=$!
+else
+  echo "⚠️ GRAFANA_URL, GRAFANA_USER, or GRAFANA_TOKEN not set. Skipping Prometheus agent."
+fi
+
 # Start Gunicorn (main Flask app)
 # Use --preload so the scheduler starts ONCE in the master process before forking workers.
 # Use 1 worker to prevent duplicate scheduler threads.
