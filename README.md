@@ -1,6 +1,6 @@
 # 📈 AI Stock Predictor & Quantitative MLOps Platform
 
-![AI Pipeline Architecture](file:///C:/Users/navee/.gemini/antigravity/brain/ff3d9b82-dc37-4c38-b777-a5f886d3d190/ai_pipeline_with_all_logos_1776946959758.png)
+![AI Pipeline Architecture](assets/ai_pipeline.png)
 
 ![GitHub License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Python Version](https://img.shields.io/badge/python-3.10%2B-blue)
@@ -54,12 +54,20 @@ The architecture is highly decoupled, ensuring the React frontend remains lightn
 
 ```mermaid
 graph TD
+    %% Advanced Styling
+    classDef frontend fill:#61DAFB,stroke:#333,stroke-width:2px,color:black,font-weight:bold;
+    classDef backend fill:#4B8BBE,stroke:#333,stroke-width:2px,color:white,font-weight:bold;
+    classDef inference fill:#FF6F00,stroke:#333,stroke-width:2px,color:white,font-weight:bold;
+    classDef registry fill:#0194E2,stroke:#333,stroke-width:2px,color:white,font-weight:bold;
+    classDef monitor fill:#F46800,stroke:#333,stroke-width:2px,color:white,font-weight:bold;
+    classDef data fill:#00E676,stroke:#333,stroke-width:2px,color:black,font-weight:bold;
+
     %% User Flow
     User((👨‍💻 User)) -->|Searches Ticker| UI[⚛️ React Frontend]
-    UI -->|REST API| API[🐍 Flask Backend]
+    UI:::frontend -->|REST API| API[🐍 Flask Backend]
     
     %% API Logic
-    API -->|Check RAM Cache| Cache{Model Cached?}
+    API:::backend -->|Check RAM Cache| Cache{Model Cached?}
     
     %% Inference Flow
     Cache -- Yes --> Inference[🚀 XGBoost + LSTM Inference]
@@ -69,21 +77,26 @@ graph TD
     Lock -- No --> Training[⚙️ Background Trainer V1/V2]
     
     %% Training Pipeline
-    Training -->|Fetch Historical| YFinance[(Yahoo Finance)]
+    Training:::backend -->|Fetch Historical| YFinance[(Yahoo Finance)]
     Training -->|Log Metrics| Registry[(MLflow / DagsHub)]
     Training -->|Save Checkpoint| Disk[(Local Storage)]
     
     %% Observability
-    Inference -->|Emit Gauges| Prometheus[📡 Prometheus Exporter]
-    Prometheus -->|Scrape| Grafana[📈 Grafana Dashboards]
+    Inference:::inference -->|Emit Gauges| Prometheus[📡 Prometheus Exporter]
+    Prometheus:::monitor -->|Scrape| Grafana[📈 Grafana Dashboards]
     
     %% Sentiment
     API -->|Fetch News| Finnhub[(Finnhub NLP)]
-    Finnhub --> Inference
+    Finnhub:::data --> Inference
     
     %% Output
-    TA --> UI
+    TA:::data --> UI
     Inference -->|Price & PnL Prediction| UI
+    
+    %% Apply loose classes
+    Registry:::registry
+    Grafana:::monitor
+    YFinance:::data
 ```
 
 ---
@@ -160,13 +173,14 @@ Contributions are welcome! If you'd like to improve the AI ensemble strategies, 
 ---
 *Built with ❤️ for Quantitative AI Enthusiasts.*
 
-## 📊 Real-World Model Performance (SONY Benchmark)
-Based on our latest V2 training pipeline execution, here are the actual validation metrics powering the predictions:
+## 📊 Real-World Model Performance (Top 5 Tech Stocks)
+Based on our latest V2 pipeline execution, here are the actual validation metrics powering the real-time AI predictions:
 
-| Metric | Value | Significance |
-| :--- | :--- | :--- |
-| **Directional Accuracy (XGBoost)** | 53.3% | Core probability of correct Up/Down prediction over the validation window. |
-| **Price MAE (Mean Absolute Error)** | 0.0404 | The average absolute error margin for magnitude predictions. |
-| **Price RMSE** | 0.0479 | Root Mean Square Error penalizing heavy outlier predictions. |
-| **Data Points Analyzed** | 162 | The precise historical window of features processed. |
-| **Data Quality Validation** | 8 / 8 Passed | Strict great_expectations validation ensuring zero data corruption. |
+| Ticker | Directional Accuracy | Price MAE | Simulated PnL (20 Trades) | Sharpe Ratio | Data Quality |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **GOOGL** | `56.6%` | `0.0675` | `+47.63%` | `5.60` | `8 / 8 Passed` |
+| **SONY** | `53.3%` | `0.0404` | `N/A` | `N/A` | `8 / 8 Passed` | 
+| **AAPL** | `49.1%` | `0.0216` | `-3.98%` | `-1.31` | `8 / 8 Passed` |
+| **MSFT** | `49.1%` | `0.0718` | `+34.76%` | `4.39` | `8 / 8 Passed` |
+| **NVDA** | `44.1%` | `0.0677` | `+70.29%` | `12.38` | `8 / 8 Passed` |
+| **AMZN** | `42.5%` | `0.0662` | `+82.56%` | `10.36` | `8 / 8 Passed` |
