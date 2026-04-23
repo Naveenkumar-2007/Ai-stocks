@@ -8,7 +8,7 @@ import {
 } from 'recharts';
 import { useAuth } from '../contexts/AuthContext';
 
-const API_BASE = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+const API_BASE = process.env.NODE_ENV === 'production' ? '' : 'http://localhost:8000';
 
 // Helper function to track user stats
 const trackUserStats = (userEmail, ticker) => {
