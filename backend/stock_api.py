@@ -1093,7 +1093,7 @@ def get_sentiment_analysis(ticker):
             'token': _get_finnhub_key()
         }
         
-        response = requests.get(url, params=params, timeout=30)
+        response = requests.get(url, params=params, timeout=10)
         
         # If news-sentiment not available, analyze company news
         if response.status_code != 200 or not response.json():
@@ -1327,7 +1327,7 @@ def get_quote_data(ticker):
             'token': _get_finnhub_key()
         }
         
-        response = requests.get(url, params=params, timeout=30)
+        response = requests.get(url, params=params, timeout=10)
         response.raise_for_status()
         quote = response.json()
         
@@ -1374,7 +1374,7 @@ def get_company_profile(ticker):
             'token': _get_finnhub_key()
         }
         
-        response = requests.get(url, params=params, timeout=30)
+        response = requests.get(url, params=params, timeout=10)
         response.raise_for_status()
         profile = response.json()
         

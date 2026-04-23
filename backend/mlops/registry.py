@@ -300,7 +300,16 @@ class ModelRegistry:
             return None
         try:
             model_name = f"LSTM_{ticker}"
-            versions = self.mlflow_client.get_latest_versions(model_name, stages=[stage])
+            import concurrent.futures
+            
+            # Strict timeout for MLflow API call to prevent Hugging Face Space hang
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(self.mlflow_client.get_latest_versions, model_name, stages=[stage])
+                try:
+                    versions = future.result(timeout=4.0)
+                except concurrent.futures.TimeoutError:
+                    print(f"MLflow API timed out for {ticker}")
+                    return None
             
             if not versions:
                 return None
