@@ -77,16 +77,19 @@ class MLOpsTrainingPipeline:
         print(f"{'='*70}\n")
         
         # MLflow context manager (no-op if mlflow not available)
-        mlflow_ctx = mlflow.start_run(run_name=f"{ticker}_{datetime.now().strftime('%Y%m%d_%H%M%S')}") if HAS_MLFLOW else None
-        if mlflow_ctx:
-            mlflow_ctx.__enter__()
+        mlflow_ctx = None
+        if HAS_MLFLOW:
             try:
-                mlflow.tensorflow.autolog(log_models=False)
-                mlflow.set_tag("ticker", ticker)
-                mlflow.set_tag("trained_at", timestamp)
-                mlflow.log_params({"ticker": ticker, "epochs": epochs, "batch_size": batch_size, "days": days})
-            except Exception:
-                pass
+                mlflow_ctx = mlflow.start_run(run_name=f"{ticker}_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+                if mlflow_ctx:
+                    mlflow_ctx.__enter__()
+                    mlflow.tensorflow.autolog(log_models=False)
+                    mlflow.set_tag("ticker", ticker)
+                    mlflow.set_tag("trained_at", timestamp)
+                    mlflow.log_params({"ticker": ticker, "epochs": epochs, "batch_size": batch_size, "days": days})
+            except Exception as e:
+                print(f"⚠️ MLflow start_run failed: {e}. Proceeding without MLflow.")
+                mlflow_ctx = None
         
         try:
             # Track current ticker for feature list saving

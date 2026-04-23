@@ -303,7 +303,13 @@ def load_lstm_model(ticker):
                         with _training_state_lock:
                             _training_in_progress.discard(ticker)
 
-                threading.Thread(target=background_train, daemon=True).start()
+                def delayed_background_train():
+                    import time
+                    print(f"⏳ Waiting 10 seconds before starting background training for {ticker} to allow API response...")
+                    time.sleep(10)
+                    background_train()
+                    
+                threading.Thread(target=delayed_background_train, daemon=True).start()
                 
         except Exception as e:
             print(f"Registry lookup failed for {ticker}: {e}")

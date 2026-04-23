@@ -37,6 +37,15 @@ def log_mlflow_run(
     data_points: int,
     params: Optional[Dict] = None,
 ) -> Optional[str]:
+    model_paths = get_model_paths(ticker)
+    
+    # ALWAYS save locally first, regardless of MLflow availability
+    try:
+        joblib.dump(xgb_model, model_paths.xgb_model)
+        lstm_model.save(model_paths.lstm_model)
+    except Exception as save_err:
+        print(f"⚠️ Failed to save local models for {ticker}: {save_err}")
+    
     try:
         import mlflow
         from mlops.config import MLOpsConfig
@@ -66,13 +75,12 @@ def log_mlflow_run(
                 "sharpe_ratio": float(metrics.get("sharpe_ratio", 0.0)),
             })
 
-            model_paths = get_model_paths(ticker)
-            joblib.dump(xgb_model, model_paths.xgb_model)
             xgb_artifact_name = f"{ticker}_xgb_model"
-            mlflow.log_artifact(str(model_paths.xgb_model), artifact_path=xgb_artifact_name)
+            if model_paths.xgb_model.exists():
+                mlflow.log_artifact(str(model_paths.xgb_model), artifact_path=xgb_artifact_name)
 
-            lstm_model.save(model_paths.lstm_model)
-            mlflow.log_artifact(str(model_paths.lstm_model), artifact_path=f"{ticker}_lstm_model")
+            if model_paths.lstm_model.exists():
+                mlflow.log_artifact(str(model_paths.lstm_model), artifact_path=f"{ticker}_lstm_model")
 
             # Best effort: if this is a TensorFlow model, also log as MLflow TF flavor.
             try:
@@ -85,7 +93,8 @@ def log_mlflow_run(
             _register_model_with_promotion(mlflow, run.info.run_id, ticker, metrics)
             return run.info.run_id
 
-    except Exception:
+    except Exception as e:
+        print(f"⚠️ MLflow V2 logging failed for {ticker}: {e}")
         return None
 
 
