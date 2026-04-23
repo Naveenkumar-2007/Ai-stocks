@@ -105,7 +105,7 @@ class TrainerV2:
         y_mag = magnitude_target.loc[common_index]
 
         xgb_model, xgb_acc = self._train_xgb(X, y_dir)
-        lstm_model, lstm_loss = self._train_lstm(X, y_mag)
+        lstm_model, lstm_metrics = self._train_lstm(X, y_mag)
 
         if np.isnan(xgb_acc) or (xgb_acc < SETTINGS.min_directional_accuracy and not force):
             return TrainResult(ticker=ticker, trained=False, drift_score=drift_score, metrics={"xgb_accuracy": xgb_acc}, reason="xgb_accuracy_below_minimum")
@@ -116,15 +116,53 @@ class TrainerV2:
 
         joblib.dump(artifacts.scaler, model_paths.scaler)
 
+        try:
+            val_size = min(20, len(X))
+            X_val_pnl = X.iloc[-val_size:]
+            pred_probs = xgb_model.predict_proba(X_val_pnl)[:, 1]
+            pred_dirs = (pred_probs >= 0.5).astype(int)
+            future_close = raw['Close'].shift(-SETTINGS.prediction_horizon_days)
+            actual_returns = (future_close - raw['Close']) / raw['Close']
+            val_returns = actual_returns.reindex(X_val_pnl.index).fillna(0)
+            trade_returns = np.where(pred_dirs == 1, val_returns, -val_returns)
+            simulated_pnl = float(np.sum(trade_returns) * 100)
+            sharpe_ratio = float(np.mean(trade_returns) / (np.std(trade_returns) + 1e-9) * np.sqrt(252))
+        except Exception as e:
+            print(f"PnL Calculation failed: {e}")
+            simulated_pnl = 0.0
+            sharpe_ratio = 0.0
+
         metrics = {
             "xgb_accuracy": float(xgb_acc),
-            "lstm_val_loss": float(lstm_loss),
+            "lstm_val_loss": float(lstm_metrics.get("val_loss", 1.0)),
             "data_points": int(len(X)),
             "validation_report_path": validation.report_path,
             "validation_checks_total": int(validation.checks_total),
             "validation_checks_passed": int(validation.checks_passed),
+            "mape": float(lstm_metrics.get("mape", 0.0)),
+            "price_mae": float(lstm_metrics.get("mae", 0.0)),
+            "price_rmse": float(lstm_metrics.get("rmse", 0.0)),
+            "r2_score": float(lstm_metrics.get("r2", 0.0)),
+            "val_loss": float(lstm_metrics.get("val_loss", 0.0)),
+            "val_mae": float(lstm_metrics.get("mae", 0.0)),
+            "validation_loss": float(lstm_metrics.get("val_loss", 0.0)),
+            "simulated_pnl": simulated_pnl,
+            "sharpe_ratio": sharpe_ratio,
         }
-        run_id = log_mlflow_run(ticker, xgb_model, lstm_model, metrics=metrics, drift_score=drift_score, data_points=len(X))
+        
+        # Add training parameters that the user expects in DagsHub
+        params = {
+            "baseline": "None",
+            "batch_size": 32,
+            "class_weight": "None",
+            "days": SETTINGS.prediction_horizon_days,
+            "epochs": SETTINGS.lstm_max_epochs,
+            "initial_epoch": 0,
+            "min_delta": 0,
+            "lstm_sequence_days": SETTINGS.lstm_sequence_days
+        }
+        
+        run_id = log_mlflow_run(ticker, xgb_model, lstm_model, metrics=metrics, params=params, drift_score=drift_score, data_points=len(X))
 
         metadata = {
             "ticker": ticker,
@@ -223,8 +261,20 @@ class TrainerV2:
             )
             reg.fit(X_train_flat, y_train)
             pred_val = reg.predict(X_val_flat).reshape(-1)
+            
+            from sklearn.metrics import mean_absolute_error, r2_score
             rmse = float(np.sqrt(mean_squared_error(y_val, pred_val)))
-            return _SklearnSequenceRegressor(reg), rmse
+            mae = float(mean_absolute_error(y_val, pred_val))
+            r2 = float(r2_score(y_val, pred_val))
+            
+            nonzero_mask = y_val != 0
+            if np.any(nonzero_mask):
+                mape = float(np.mean(np.abs((y_val[nonzero_mask] - pred_val[nonzero_mask]) / y_val[nonzero_mask])) * 100)
+            else:
+                mape = 0.0
+                
+            metrics_dict = {"rmse": rmse, "mae": mae, "r2": r2, "mape": mape, "val_loss": rmse}
+            return _SklearnSequenceRegressor(reg), metrics_dict
 
         # oneDNN can be unstable on some Windows CPU stacks for small recurrent models.
         os.environ.setdefault("TF_ENABLE_ONEDNN_OPTS", "0")
@@ -254,6 +304,18 @@ class TrainerV2:
         )
 
         pred_val = model.predict(X_val, verbose=0).reshape(-1)
+        
+        from sklearn.metrics import mean_absolute_error, r2_score
         rmse = float(np.sqrt(mean_squared_error(y_val, pred_val)))
+        mae = float(mean_absolute_error(y_val, pred_val))
+        r2 = float(r2_score(y_val, pred_val))
+        
+        nonzero_mask = y_val != 0
+        if np.any(nonzero_mask):
+            mape = float(np.mean(np.abs((y_val[nonzero_mask] - pred_val[nonzero_mask]) / y_val[nonzero_mask])) * 100)
+        else:
+            mape = 0.0
+            
         val_loss = float(hist.history.get("val_loss", [rmse])[-1])
-        return model, val_loss
+        metrics_dict = {"rmse": rmse, "mae": mae, "r2": r2, "mape": mape, "val_loss": val_loss}
+        return model, metrics_dict

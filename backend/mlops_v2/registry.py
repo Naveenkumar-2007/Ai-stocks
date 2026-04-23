@@ -35,6 +35,7 @@ def log_mlflow_run(
     metrics: Dict,
     drift_score: float,
     data_points: int,
+    params: Optional[Dict] = None,
 ) -> Optional[str]:
     try:
         import mlflow
@@ -45,11 +46,24 @@ def log_mlflow_run(
 
         with mlflow.start_run(run_name=f"{ticker}_v2") as run:
             mlflow.set_tags({"ticker": ticker, "pipeline": "mlops_v2"})
+            
+            if params:
+                mlflow.log_params(params)
+                
             mlflow.log_metrics({
                 "xgb_accuracy": float(metrics.get("xgb_accuracy", 0.0)),
                 "lstm_val_loss": float(metrics.get("lstm_val_loss", 0.0)),
                 "drift_score": float(drift_score),
                 "data_points": float(data_points),
+                "mape": float(metrics.get("mape", 0.0)),
+                "price_mae": float(metrics.get("price_mae", 0.0)),
+                "price_rmse": float(metrics.get("price_rmse", 0.0)),
+                "r2_score": float(metrics.get("r2_score", 0.0)),
+                "val_loss": float(metrics.get("val_loss", 0.0)),
+                "val_mae": float(metrics.get("val_mae", 0.0)),
+                "validation_loss": float(metrics.get("validation_loss", 0.0)),
+                "simulated_pnl": float(metrics.get("simulated_pnl", 0.0)),
+                "sharpe_ratio": float(metrics.get("sharpe_ratio", 0.0)),
             })
 
             model_paths = get_model_paths(ticker)

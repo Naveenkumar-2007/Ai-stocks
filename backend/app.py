@@ -277,12 +277,21 @@ def load_lstm_model(ticker):
                     print(f"⏳ Training already in progress for {ticker}. Skipping duplicate trigger.")
                 else:
                     print(f"🚀 No model for {ticker}. Triggering background training...")
-                from mlops_v2.training import TrainerV2
-
                 def background_train():
                     try:
+                        # Train V1 first (powers multi-day LSTM charting & prediction endpoints)
+                        try:
+                            from mlops.training_pipeline import MLOpsTrainingPipeline
+                            pipeline = MLOpsTrainingPipeline()
+                            print(f"🚀 Background V1 training started for {ticker}")
+                            pipeline.train_model(ticker=ticker, epochs=20, days=730)
+                            print(f"✅ Background V1 training completed for {ticker}")
+                        except Exception as v1_err:
+                            print(f"⚠️ Background V1 training failed for {ticker}: {v1_err}")
+                            
+                        # Train V2 (powers inference metrics and drift detection)
+                        from mlops_v2.training import TrainerV2
                         trainer = TrainerV2()
-                        # Force first-time training for unseen symbols discovered from user traffic.
                         result = trainer.train_if_needed(ticker=ticker, force=True)
                         if result.trained:
                             print(f"✅ Background v2 training completed for {ticker}")
@@ -887,6 +896,13 @@ def get_stock_data(ticker):
             raw_sentiment = get_sentiment_analysis(resolved_ticker)
             if raw_sentiment:
                 sentiment_data = raw_sentiment
+                # Update Grafana Viral Ticker gauge
+                try:
+                    from mlops_v2.monitoring import set_viral_ticker
+                    buzz_score = raw_sentiment.get('buzz_score') or raw_sentiment.get('buzz_articles') or 0
+                    set_viral_ticker(resolved_ticker, float(buzz_score))
+                except Exception as monitoring_err:
+                    print(f"Failed to update viral ticker gauge: {monitoring_err}")
         except Exception as e:
             print(f"Sentiment fetch failed: {e}")
 
@@ -1115,6 +1131,29 @@ def get_stock_data(ticker):
         try:
             from mlops_v2.inference import InferenceServiceV2
             v2_payload = InferenceServiceV2().predict(resolved_ticker)
+            
+            # Update Grafana Accuracy and PnL gauges
+            try:
+                from mlops_v2.monitoring import set_accuracy_20d, set_simulated_pnl, set_sharpe_ratio
+                import json
+                from mlops_v2.registry import get_model_paths
+                metadata_path = get_model_paths(resolved_ticker).metadata
+                if metadata_path.exists():
+                    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+                    metrics = metadata.get("metrics", {})
+                    
+                    accuracy = float(metrics.get("xgb_accuracy", 0.0))
+                    set_accuracy_20d(resolved_ticker, accuracy)
+                    
+                    pnl = float(metrics.get("simulated_pnl", 0.0))
+                    set_simulated_pnl(resolved_ticker, pnl)
+                    
+                    sharpe = float(metrics.get("sharpe_ratio", 0.0))
+                    set_sharpe_ratio(resolved_ticker, sharpe)
+                    
+            except Exception as monitoring_err:
+                print(f"Failed to update monitoring gauges: {monitoring_err}")
+                
         except Exception as _v2_exc:
             # Fallback to local computation if v2 models are unavailable.
             five_day_pred = predictions[min(4, len(predictions) - 1)] if predictions else current_price
