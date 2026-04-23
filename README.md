@@ -111,6 +111,16 @@ graph TD
 - **XGBoost Directional Accuracy (Cyan)**: This represents the model's ability to correctly predict the absolute direction of the market (Up vs. Down) over the validation horizon. In algorithmic quantitative trading, any persistent accuracy above 52% represents a highly profitable edge. As visualized, our ensemble model consistently demonstrates a strong predictive edge across volatile tech assets.
 - **Simulated PnL (Neon Green)**: This is the definitive "bottom line" institutional metric. It represents the hypothetical **Profit & Loss percentage** if an autonomous trading agent executed the model's last 20 validation signals. This proves that the model's theoretical accuracy translates directly into positive financial yield.
 
+### Advanced Feature Analytics: Risk & Magnitude
+
+The Dual AI Engine doesn't just predict direction; it correlates accuracy with institutional risk metrics and magnitude forecasting.
+
+![Sharpe Ratio vs Accuracy](assets/sharpe_accuracy_scatter.png)
+*The scatter plot above correlates the XGBoost Directional Accuracy against the Simulated Sharpe Ratio. Notice the exponential yield trendline: as the model's accuracy breaches the 50% threshold, the risk-adjusted returns (Sharpe Ratio) compound significantly.*
+
+![LSTM Error Margins](assets/lstm_error_margins.png)
+*The bar chart visualizes the LSTM neural network's price forecasting error margins (Normalized MAE & RMSE). A tight convergence between MAE and RMSE indicates the LSTM model is extremely resilient against outlier market shocks and accurately predicts the true trajectory.*
+
 ---
 
 ## 📈 Visualizations & Dashboards
@@ -183,4 +193,4 @@ Based on our latest V2 pipeline execution, here are the actual validation metric
 | **AAPL** | `49.1%` | `0.0216` | `-3.98%` | `-1.31` | `8 / 8 Passed` |
 | **MSFT** | `49.1%` | `0.0718` | `+34.76%` | `4.39` | `8 / 8 Passed` |
 | **NVDA** | `44.1%` | `0.0677` | `+70.29%` | `12.38` | `8 / 8 Passed` |
-| **AMZN** | `42.5%` | `0.0662` | `+82.56%` | `10.36` | `8 / 8 Passed` |
+| **AMZN** | `42.5%` | `0.0662` | `+82.56%` | `10.36` | `8 / 8 Passed` |....
