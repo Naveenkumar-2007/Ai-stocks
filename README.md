@@ -1,3 +1,13 @@
+---
+title: AI Stock Predictor
+emoji: 📈
+colorFrom: blue
+colorTo: green
+sdk: docker
+pinned: false
+app_port: 7860
+---
+
 # 📈 AI Stock Predictor & Quantitative MLOps Platform
 
 ![AI Pipeline Architecture](assets/ai_pipeline.png)
