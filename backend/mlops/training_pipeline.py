@@ -45,8 +45,12 @@ class MLOpsTrainingPipeline:
         
         # Configure MLflow if available
         if HAS_MLFLOW:
-            mlflow.set_tracking_uri(MLOpsConfig.MLFLOW_TRACKING_URI)
-            mlflow.set_experiment(MLOpsConfig.MLFLOW_EXPERIMENT_NAME)
+            try:
+                mlflow.set_tracking_uri(MLOpsConfig.MLFLOW_TRACKING_URI)
+                self._set_experiment_safe(MLOpsConfig.MLFLOW_EXPERIMENT_NAME)
+            except Exception as e:
+                print(f"⚠️ MLflow init failed: {e}. Training will proceed without MLflow.")
+                globals()['HAS_MLFLOW'] = False
         
         self.registry = ModelRegistry(registry_path)
         self.logs_dir = 'mlops/logs'
@@ -57,6 +61,27 @@ class MLOpsTrainingPipeline:
         os.makedirs(self.logs_dir, exist_ok=True)
         os.makedirs(self.checkpoints_dir, exist_ok=True)
         os.makedirs(self.artifacts_dir, exist_ok=True)
+
+    @staticmethod
+    def _set_experiment_safe(experiment_name: str):
+        """Set MLflow experiment, restoring it first if it was soft-deleted."""
+        try:
+            mlflow.set_experiment(experiment_name)
+        except Exception as first_err:
+            if "deleted" in str(first_err).lower():
+                try:
+                    client = mlflow.tracking.MlflowClient()
+                    exp = client.get_experiment_by_name(experiment_name)
+                    if exp and exp.lifecycle_stage == "deleted":
+                        client.restore_experiment(exp.experiment_id)
+                        print(f"♻️ Restored deleted MLflow experiment '{experiment_name}'")
+                    mlflow.set_experiment(experiment_name)
+                except Exception as restore_err:
+                    print(f"⚠️ Could not restore experiment '{experiment_name}': {restore_err}")
+                    # Create with a new name as last resort
+                    mlflow.set_experiment(f"{experiment_name}_v2")
+            else:
+                raise
     
     def train_model(
         self, 
@@ -144,6 +169,14 @@ class MLOpsTrainingPipeline:
             print("-" * 70)
             metrics = self._evaluate_model(model, history, X_test, y_test, scaler, len(train_data))
             self._print_metrics(metrics)
+            
+            # Push metrics to Grafana/Prometheus
+            try:
+                from mlops_v2.monitoring import set_accuracy_20d
+                set_accuracy_20d(ticker, float(metrics.get('directional_accuracy', 0)))
+                print(f"📊 Pushed model accuracy to Grafana for {ticker}: {metrics.get('directional_accuracy', 0)}%")
+            except Exception as e:
+                print(f"⚠️ Failed to push metrics to Grafana: {e}")
             
             # Log metrics to MLflow if available
             if HAS_MLFLOW:

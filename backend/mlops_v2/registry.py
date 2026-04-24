@@ -28,6 +28,28 @@ def get_model_paths(ticker: str) -> ModelPaths:
     )
 
 
+def _set_experiment_safe(experiment_name: str) -> None:
+    """Set MLflow experiment, restoring it first if it was soft-deleted."""
+    import mlflow as _mlflow
+
+    try:
+        _mlflow.set_experiment(experiment_name)
+    except Exception as first_err:
+        if "deleted" in str(first_err).lower():
+            try:
+                client = _mlflow.tracking.MlflowClient()
+                exp = client.get_experiment_by_name(experiment_name)
+                if exp and exp.lifecycle_stage == "deleted":
+                    client.restore_experiment(exp.experiment_id)
+                    print(f"♻️ Restored deleted MLflow experiment '{experiment_name}'")
+                _mlflow.set_experiment(experiment_name)
+            except Exception as restore_err:
+                print(f"⚠️ Could not restore experiment '{experiment_name}': {restore_err}")
+                _mlflow.set_experiment(f"{experiment_name}_v2")
+        else:
+            raise
+
+
 def log_mlflow_run(
     ticker: str,
     xgb_model,
@@ -51,7 +73,7 @@ def log_mlflow_run(
         from mlops.config import MLOpsConfig
 
         mlflow.set_tracking_uri(MLOpsConfig.MLFLOW_TRACKING_URI)
-        mlflow.set_experiment(MLOpsConfig.MLFLOW_EXPERIMENT_NAME)
+        _set_experiment_safe(MLOpsConfig.MLFLOW_EXPERIMENT_NAME)
 
         with mlflow.start_run(run_name=f"{ticker}_v2") as run:
             mlflow.set_tags({"ticker": ticker, "pipeline": "mlops_v2"})
@@ -95,6 +117,7 @@ def log_mlflow_run(
 
     except Exception as e:
         print(f"⚠️ MLflow V2 logging failed for {ticker}: {e}")
+        print(f"   ✅ Local models were saved successfully — training is NOT lost.")
         return None
 
 

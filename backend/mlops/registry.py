@@ -45,8 +45,9 @@ class ModelRegistry:
                 os.environ['MLFLOW_HTTP_REQUEST_TIMEOUT'] = '5'
                 mlflow.set_tracking_uri(MLOpsConfig.MLFLOW_TRACKING_URI)
                 self.mlflow_client = mlflow.tracking.MlflowClient()
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"⚠️ MLflow client init failed: {e}. Using local registry only.")
+                self.mlflow_client = None
         
         # Create registry & store directories
         os.makedirs(registry_path, exist_ok=True)

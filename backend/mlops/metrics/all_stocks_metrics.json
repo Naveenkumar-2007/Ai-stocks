@@ -1,0 +1,127 @@
+{
+  "run_started_at": "2026-04-22T11:01:32.116741Z",
+  "run_finished_at": "2026-04-22T11:09:00.800717Z",
+  "duration_seconds": 448.68,
+  "training_config": {
+    "epochs": 50,
+    "batch_size": 32,
+    "days": 730,
+    "clean_start": false,
+    "max_stocks": 5,
+    "start_from": null
+  },
+  "aggregate": {
+    "total_requested": 5,
+    "success_count": 5,
+    "failed_count": 0,
+    "success_rate": 100.0,
+    "avg_rmse": 0.018886,
+    "avg_mae": 0.01417,
+    "avg_mape": 132.161817,
+    "avg_r2": -0.001767,
+    "avg_directional_accuracy": 51.578947,
+    "best_by_mape": {
+      "ticker": "NVDA",
+      "mape": 102.36134959459437,
+      "version": 2
+    }
+  },
+  "successful": [
+    {
+      "ticker": "AAPL",
+      "version": 2,
+      "status": "success",
+      "metrics": {
+        "train_loss": 0.006390794645994902,
+        "val_loss": 0.004742132034152746,
+        "test_loss": 0.004011626821011305,
+        "mse": 0.00024226388206903331,
+        "rmse": 0.015564828366192584,
+        "mae": 0.01150807156763323,
+        "r2": -0.008368995954165293,
+        "mape": 204.68701391829111,
+        "directional_accuracy": 47.368421052631575,
+        "epochs_trained": 26,
+        "train_samples": 544,
+        "test_samples": 77
+      }
+    },
+    {
+      "ticker": "MSFT",
+      "version": 2,
+      "status": "success",
+      "metrics": {
+        "train_loss": 0.008546220138669014,
+        "val_loss": 0.017997123301029205,
+        "test_loss": 0.015520341694355011,
+        "mse": 0.00041309847153071376,
+        "rmse": 0.020324824022133963,
+        "mae": 0.014121157685131603,
+        "r2": 0.0017073912373564148,
+        "mape": 125.20688969693315,
+        "directional_accuracy": 56.57894736842105,
+        "epochs_trained": 22,
+        "train_samples": 544,
+        "test_samples": 77
+      }
+    },
+    {
+      "ticker": "GOOGL",
+      "version": 2,
+      "status": "success",
+      "metrics": {
+        "train_loss": 0.011933919042348862,
+        "val_loss": 0.007319855038076639,
+        "test_loss": 0.007130754645913839,
+        "mse": 0.00027768676224242583,
+        "rmse": 0.016663935976906113,
+        "mae": 0.013008929521460974,
+        "r2": 0.009602621445094828,
+        "mape": 118.15950381806385,
+        "directional_accuracy": 52.63157894736842,
+        "epochs_trained": 11,
+        "train_samples": 544,
+        "test_samples": 77
+      }
+    },
+    {
+      "ticker": "AMZN",
+      "version": 2,
+      "status": "success",
+      "metrics": {
+        "train_loss": 0.00986409094184637,
+        "val_loss": 0.010468009859323502,
+        "test_loss": 0.009255430661141872,
+        "mse": 0.00040646243418634574,
+        "rmse": 0.02016091352559069,
+        "mae": 0.015860774819427284,
+        "r2": -0.006706064291491121,
+        "mape": 110.39432740628543,
+        "directional_accuracy": 50.0,
+        "epochs_trained": 19,
+        "train_samples": 544,
+        "test_samples": 77
+      }
+    },
+    {
+      "ticker": "NVDA",
+      "version": 2,
+      "status": "success",
+      "metrics": {
+        "train_loss": 0.009860126301646233,
+        "val_loss": 0.0038507061544805765,
+        "test_loss": 0.0037012083921581507,
+        "mse": 0.0004714750877653121,
+        "rmse": 0.02171347709984083,
+        "mae": 0.016351393221221044,
+        "r2": -0.005069167917989503,
+        "mape": 102.36134959459437,
+        "directional_accuracy": 51.31578947368421,
+        "epochs_trained": 14,
+        "train_samples": 544,
+        "test_samples": 77
+      }
+    }
+  ],
+  "failed": []
+}

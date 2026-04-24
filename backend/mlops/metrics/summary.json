@@ -1,0 +1,19 @@
+{
+  "run_started_at": "2026-04-22T11:01:32.116741Z",
+  "run_finished_at": "2026-04-22T11:09:00.800717Z",
+  "duration_seconds": 448.68,
+  "total_requested": 5,
+  "success_count": 5,
+  "failed_count": 0,
+  "success_rate": 100.0,
+  "avg_rmse": 0.018886,
+  "avg_mae": 0.01417,
+  "avg_mape": 132.161817,
+  "avg_r2": -0.001767,
+  "avg_directional_accuracy": 51.578947,
+  "best_by_mape": {
+    "ticker": "NVDA",
+    "mape": 102.36134959459437,
+    "version": 2
+  }
+}

@@ -1,0 +1,18 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: hf-space
+    scheme: https
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - naveen-2007-ai-stock-predictor.hf.space
+
+  - job_name: local-backend-optional
+    scheme: http
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - host.docker.internal:8000
