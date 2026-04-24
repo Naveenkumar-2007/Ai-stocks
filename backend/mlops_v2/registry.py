@@ -98,6 +98,16 @@ def log_mlflow_run(
                 "sharpe_ratio": float(metrics.get("sharpe_ratio", 0.0)),
             })
 
+            # Log Evidently AI HTML Reports to DagsHub
+            from pathlib import Path
+            val_report = metrics.get("validation_report_path")
+            if val_report and Path(val_report).exists():
+                mlflow.log_artifact(str(val_report), artifact_path="evidently_reports")
+                
+            drift_report = metrics.get("drift_report_path")
+            if drift_report and Path(drift_report).exists():
+                mlflow.log_artifact(str(drift_report), artifact_path="evidently_reports")
+
             xgb_artifact_name = f"{ticker}_xgb_model"
             if model_paths.xgb_model.exists():
                 mlflow.log_artifact(str(model_paths.xgb_model), artifact_path=xgb_artifact_name)
