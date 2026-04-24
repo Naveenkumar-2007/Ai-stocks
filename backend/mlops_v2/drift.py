@@ -45,7 +45,8 @@ def compute_drift(reference_df: pd.DataFrame, current_df: pd.DataFrame, report_n
         drift_score = (drifted / total) if total else 0.0
         return DriftResult(drift_score=drift_score, drifted_features=drifted, report_path=report_path)
 
-    except Exception:
-        # Safe default from requirement: if drift check fails, train anyway.
-        report_path.write_text("Drift check failed; defaulting to train-anyway policy.", encoding="utf-8")
+    except Exception as e:
+        import traceback
+        error_msg = f"Drift check failed; defaulting to train-anyway policy.<br><br><b>Error details:</b><br><pre>{traceback.format_exc()}</pre>"
+        report_path.write_text(error_msg, encoding="utf-8")
         return DriftResult(drift_score=1.0, drifted_features=len(reference_df.columns), report_path=report_path)
