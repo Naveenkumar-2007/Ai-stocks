@@ -312,7 +312,11 @@ class ModelRegistry:
             artifact_local_path = os.path.join(self.registry_path, f"mlflow_{ticker}_{stage}")
             os.makedirs(artifact_local_path, exist_ok=True)
             
-            self.mlflow_client.download_artifacts(run_id, f"{ticker}_scaler.pkl", artifact_local_path)
+            try:
+                self.mlflow_client.download_artifacts(run_id, "preprocessing/scaler.pkl", artifact_local_path)
+            except Exception as e:
+                print(f"Failed to download scaler from MLflow: {e}")
+                
             model_local_path = None
             try:
                 self.mlflow_client.download_artifacts(run_id, "model/data/model.keras", artifact_local_path)
@@ -325,7 +329,7 @@ class ModelRegistry:
                 'ticker': ticker,
                 'version': latest_version.version,
                 'model_path': model_local_path,
-                'scaler_path': os.path.join(artifact_local_path, f"{ticker}_scaler.pkl"),
+                'scaler_path': os.path.join(artifact_local_path, "preprocessing", "scaler.pkl"),
                 'source': 'mlflow'
             }
             
