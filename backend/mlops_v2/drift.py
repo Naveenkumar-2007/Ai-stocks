@@ -23,7 +23,7 @@ def compute_drift(reference_df: pd.DataFrame, current_df: pd.DataFrame, report_n
     report_path = report_dir / f"{report_name}.html"
 
     try:
-        from evidently import Report  # type: ignore
+        from evidently.report import Report  # type: ignore
         from evidently.metric_preset import DataDriftPreset  # type: ignore
 
         report = Report(metrics=[DataDriftPreset()])
