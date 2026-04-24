@@ -142,6 +142,7 @@ class TrainerV2:
             "mape": float(lstm_metrics.get("mape", 0.0)),
             "price_mae": float(lstm_metrics.get("mae", 0.0)),
             "price_rmse": float(lstm_metrics.get("rmse", 0.0)),
+            "directional_accuracy": float(xgb_acc),
             "r2_score": float(lstm_metrics.get("r2", 0.0)),
             "val_loss": float(lstm_metrics.get("val_loss", 0.0)),
             "val_mae": float(lstm_metrics.get("mae", 0.0)),

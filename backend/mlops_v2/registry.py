@@ -84,6 +84,7 @@ def log_mlflow_run(
             mlflow.log_metrics({
                 "xgb_accuracy": float(metrics.get("xgb_accuracy", 0.0)),
                 "lstm_val_loss": float(metrics.get("lstm_val_loss", 0.0)),
+                "directional_accuracy": float(metrics.get("directional_accuracy", metrics.get("xgb_accuracy", 0.0))),
                 "drift_score": float(drift_score),
                 "data_points": float(data_points),
                 "mape": float(metrics.get("mape", 0.0)),
