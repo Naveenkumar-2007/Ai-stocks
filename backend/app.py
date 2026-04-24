@@ -9,6 +9,9 @@ from logging.handlers import RotatingFileHandler
 from functools import wraps
 from werkzeug.exceptions import HTTPException
 
+# Suppress verbose HTTP retry warnings from urllib3 when DagsHub is slow
+logging.getLogger("urllib3").setLevel(logging.ERROR)
+
 warnings.filterwarnings('ignore')
 
 try:
