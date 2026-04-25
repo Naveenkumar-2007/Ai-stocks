@@ -60,3 +60,5 @@ frontend/.env.local
 !backend/mlops/model_registry/model_store/**/model.h5
 !backend/mlops/model_registry/model_store/**/scaler.pkl
 *.keras
+# Chat Storage
+backend/chatbot/app/chat_storage/*.json
