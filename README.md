@@ -62,51 +62,35 @@ Every tool in this repository was carefully selected to replicate a professional
 
 The architecture is highly decoupled, ensuring the React frontend remains lightning-fast while heavy tensor computations occur asynchronously.
 
+![System Architecture](assets/branded_architecture.png)
+
+### Core System Flow
+
 ```mermaid
 graph TD
-    %% Advanced Styling
-    classDef frontend fill:#61DAFB,stroke:#333,stroke-width:2px,color:black,font-weight:bold;
-    classDef backend fill:#4B8BBE,stroke:#333,stroke-width:2px,color:white,font-weight:bold;
-    classDef inference fill:#FF6F00,stroke:#333,stroke-width:2px,color:white,font-weight:bold;
-    classDef registry fill:#0194E2,stroke:#333,stroke-width:2px,color:white,font-weight:bold;
-    classDef monitor fill:#F46800,stroke:#333,stroke-width:2px,color:white,font-weight:bold;
-    classDef data fill:#00E676,stroke:#333,stroke-width:2px,color:black,font-weight:bold;
+    %% Styling Colors
+    classDef frontend fill:#131833,stroke:#00B8FF,stroke-width:2px,color:#fff;
+    classDef backend fill:#131833,stroke:#00B8FF,stroke-width:2px,color:#fff;
+    classDef mlops fill:#131833,stroke:#00B8FF,stroke-width:2px,color:#fff;
+    classDef external fill:#0A0E1F,stroke:#252B4A,stroke-width:2px,color:#cbd5e1;
 
-    %% User Flow
-    User((👨‍💻 User)) -->|Searches Ticker| UI[⚛️ React Frontend]
-    UI:::frontend -->|REST API| API[🐍 Flask Backend]
+    %% The 4 Main Parts of Your System
+    A[💻 React Website UI]:::frontend
+    B[⚙️ Flask Backend Server]:::backend
+    C[🤖 FastAPI AI Chatbot]:::backend
+    D[🧠 Machine Learning Pipeline]:::mlops
     
-    %% API Logic
-    API:::backend -->|Check RAM Cache| Cache{Model Cached?}
+    %% External Data
+    E[📈 Live Stock Market APIs]:::external
+
+    %% How they connect
+    A -->|1. User Searches Stock| B
+    A -->|2. User Asks Question| C
     
-    %% Inference Flow
-    Cache -- Yes --> Inference[🚀 XGBoost + LSTM Inference]
-    Cache -- No --> Lock{Thread Locked?}
+    B -->|Fetches Live Prices| E
+    C -->|Fetches Live News| E
     
-    Lock -- Yes --> TA[📉 Technical Analysis Fallback]
-    Lock -- No --> Training[⚙️ Background Trainer V1/V2]
-    
-    %% Training Pipeline
-    Training:::backend -->|Fetch Historical| TwelveData[(Twelve Data API)]
-    Training -->|Log Metrics| Registry[(MLflow / DagsHub)]
-    Training -->|Save Checkpoint| Disk[(Local Storage)]
-    
-    %% Observability
-    Inference:::inference -->|Emit Gauges| Prometheus[📡 Prometheus Exporter]
-    Prometheus:::monitor -->|Scrape| Grafana[📈 Grafana Dashboards]
-    
-    %% Sentiment
-    API -->|Fetch News| Finnhub[(Finnhub NLP)]
-    Finnhub:::data --> Inference
-    
-    %% Output
-    TA:::data --> UI
-    Inference -->|Price & PnL Prediction| UI
-    
-    %% Apply loose classes
-    Registry:::registry
-    Grafana:::monitor
-    TwelveData:::data
+    D -->|Trains AI Models in Background| B
 ```
 
 ---

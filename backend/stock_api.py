@@ -36,7 +36,7 @@ except ImportError:  # pragma: no cover - handled gracefully at runtime
 load_dotenv()
 
 
-# â”€â”€ API Key Rotator â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
 import threading
 
 class KeyRotator:
@@ -144,7 +144,7 @@ COUNTRY_SUFFIX_FALLBACKS = {
 DEFAULT_SUFFIX_FALLBACKS = ['.NS', '.BO', '.L', '.HK', '.TO']
 
 
-# â”€â”€ Dynamic key getters (always return the currently active key) â”€â”€
+#  Dynamic key getters (always return the currently active key) 
 def _get_twelve_key():
     return twelve_data_rotator.key
 
