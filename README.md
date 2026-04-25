@@ -10,7 +10,7 @@ app_port: 7860
 
 # 📈 AI Stock Predictor & Quantitative MLOps Platform
 
-![AI Pipeline Architecture](assets/isometric_architecture_branded.png)
+![AI Pipeline Architecture](assets/ai_pipeline.png)
 
 ![GitHub License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Python Version](https://img.shields.io/badge/python-3.10%2B-blue)
