@@ -68,29 +68,69 @@ The architecture is highly decoupled, ensuring the React frontend remains lightn
 
 ```mermaid
 graph TD
-    %% Styling Colors
-    classDef frontend fill:#131833,stroke:#00B8FF,stroke-width:2px,color:#fff;
-    classDef backend fill:#131833,stroke:#00B8FF,stroke-width:2px,color:#fff;
-    classDef mlops fill:#131833,stroke:#00B8FF,stroke-width:2px,color:#fff;
-    classDef external fill:#0A0E1F,stroke:#252B4A,stroke-width:2px,color:#cbd5e1;
+    %% Tool Colors
+    classDef react fill:#61DAFB,stroke:#333,stroke-width:2px,color:#000,font-weight:bold;
+    classDef firebase fill:#FFCA28,stroke:#333,stroke-width:2px,color:#000,font-weight:bold;
+    classDef flask fill:#FFFFFF,stroke:#333,stroke-width:2px,color:#000,font-weight:bold;
+    classDef fastapi fill:#009688,stroke:#333,stroke-width:2px,color:#fff,font-weight:bold;
+    classDef tensorflow fill:#FF6F00,stroke:#333,stroke-width:2px,color:#fff,font-weight:bold;
+    classDef mlflow fill:#0194E2,stroke:#333,stroke-width:2px,color:#fff,font-weight:bold;
+    classDef docker fill:#2496ED,stroke:#333,stroke-width:2px,color:#fff,font-weight:bold;
+    classDef dvc fill:#945DD6,stroke:#333,stroke-width:2px,color:#fff,font-weight:bold;
+    classDef groq fill:#F55036,stroke:#333,stroke-width:2px,color:#fff,font-weight:bold;
+    classDef db fill:#333333,stroke:#00B8FF,stroke-width:2px,color:#fff,font-weight:bold;
+    classDef logo fill:none,stroke:none,color:transparent;
 
-    %% The 4 Main Parts of Your System
-    A[💻 React Website UI]:::frontend
-    B[⚙️ Flask Backend Server]:::backend
-    C[🤖 FastAPI AI Chatbot]:::backend
-    D[🧠 Machine Learning Pipeline]:::mlops
-    
-    %% External Data
-    E[📈 Live Stock Market APIs]:::external
+    %% Logo in Corner
+    LOGO["<img src='https://raw.githubusercontent.com/Naveenkumar-2007/Ai-stocks/main/frontend/public/assets/logo-dark.jpg' width='140'/>"]:::logo
 
-    %% How they connect
-    A -->|1. User Searches Stock| B
-    A -->|2. User Asks Question| C
-    
-    B -->|Fetches Live Prices| E
-    C -->|Fetches Live News| E
-    
-    D -->|Trains AI Models in Background| B
+    subgraph ClientLayer ["1. Client Layer"]
+        A["<img src='https://upload.wikimedia.org/wikipedia/commons/a/a7/React-icon.svg' width='20'/> React.js Frontend"]:::react
+        B["<img src='https://upload.wikimedia.org/wikipedia/commons/3/37/Firebase_Logo.svg' width='20'/> Firebase Auth"]:::firebase
+    end
+
+    subgraph APILayer ["2. API Services (Dockerized)"]
+        C["<img src='https://upload.wikimedia.org/wikipedia/commons/c/c3/Python-logo-notext.svg' width='20'/> Flask Backend API"]:::flask
+        D["<img src='https://fastapi.tiangolo.com/img/logo-margin/logo-teal.png' width='20'/> FastAPI Chatbot"]:::fastapi
+    end
+
+    subgraph MLOpsLayer ["3. Data & MLOps Pipeline"]
+        E["DVC Orchestrator"]:::dvc
+        F["<img src='https://upload.wikimedia.org/wikipedia/commons/2/2d/Tensorflow_logo.svg' width='20'/> TensorFlow LSTM Models"]:::tensorflow
+        G["<img src='https://upload.wikimedia.org/wikipedia/commons/f/fe/Mlflow-logo.svg' width='20'/> MLflow Registry"]:::mlflow
+        H[("Local Model Storage")]:::db
+    end
+
+    subgraph RAGLayer ["4. AI RAG Chatbot"]
+        I[("FAISS Vector Database")]:::db
+        J["LangChain Engine"]:::fastapi
+        K["Groq Llama 3 LLM"]:::groq
+    end
+
+    subgraph ExternalLayer ["5. External Financial Data"]
+        L["TwelveData API"]:::db
+        M["Finnhub API"]:::db
+    end
+
+    %% Wiring
+    LOGO ~~~ ClientLayer
+
+    A <-->|Auth Token| B
+    A -->|Fetch Stock Predictions| C
+    A -->|Chat with AI| D
+
+    C <-->|Get Live Prices| L
+    C <-->|Get Live News| M
+    C -->|Load Best Model| H
+
+    D <-->|Fetch Live Context| M
+    D <-->|Semantic Search| I
+    D -->|Build Prompt| J
+    J <-->|Stream Response| K
+
+    E -->|Trigger Daily Training| F
+    F -->|Log Accuracy Metrics| G
+    F -->|Save .keras files| H
 ```
 
 ---
