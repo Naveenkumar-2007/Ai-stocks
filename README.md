@@ -10,7 +10,7 @@ app_port: 7860
 
 # 📈 AI Stock Predictor & Quantitative MLOps Platform
 
-![AI Pipeline Architecture](assets/ai_pipeline.png)
+![AI Pipeline Architecture](assets/isometric_architecture.png)
 
 ![GitHub License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Python Version](https://img.shields.io/badge/python-3.10%2B-blue)
@@ -146,26 +146,31 @@ graph TD
 To protect the system from market regime changes (like sudden crashes or sector rotations), the V2 pipeline implements an enterprise-grade **Continuous Training (CT)** loop using statistical drift detection. This ensures we only spend compute resources retraining models when the market behavior actually changes.
 
 ```mermaid
-sequenceDiagram
-    autonumber
-    participant S as 🕒 Background Scheduler
-    participant D as 📊 Data Ingestion (TwelveData/Finnhub)
-    participant M as 🧠 Production Model
-    participant E as 🕵️ Statistical Drift Monitor
-    participant ML as 📦 MLflow Registry
+graph TD
+    %% Advanced Styling
+    classDef scheduler fill:#9C27B0,stroke:#fff,stroke-width:2px,color:#fff,font-weight:bold;
+    classDef data fill:#00BCD4,stroke:#fff,stroke-width:2px,color:#000,font-weight:bold;
+    classDef model fill:#FF9800,stroke:#fff,stroke-width:2px,color:#000,font-weight:bold;
+    classDef monitor fill:#F44336,stroke:#fff,stroke-width:2px,color:#fff,font-weight:bold;
+    classDef registry fill:#03A9F4,stroke:#fff,stroke-width:2px,color:#000,font-weight:bold;
+    classDef success fill:#4CAF50,stroke:#fff,stroke-width:2px,color:#fff,font-weight:bold;
+
+    S["🕒 Airflow Background Scheduler"]:::scheduler
+    D["📊 Data Ingestion Engine<br/>(TwelveData & Finnhub)"]:::data
+    M["🧠 Production LSTM/XGBoost Model"]:::model
+    E{"🕵️ Statistical Drift Monitor<br/>(KS-Test & PSI)"}:::monitor
+    ML["📦 MLflow Model Registry"]:::registry
     
-    S->>D: Trigger Daily Evaluation Job
-    D->>M: Fetch latest market data (Validation Set)
-    M->>E: Compare recent predictions vs actual market reality
-    E-->>E: Calculate Data Drift & Concept Drift Scores
-    alt Drift Score > Safe Threshold
-        E->>ML: ⚠️ Signal Model Decay Detected!
-        ML->>D: Pull full historical dataset (730+ days)
-        D->>M: Initiate Deep Retraining (XGBoost/LSTM)
-        M->>ML: Register & Tag new Champion Model
-    else Drift Score < Safe Threshold
-        E->>S: ✅ Model is healthy. Skip retraining (Saves Compute)
-    end
+    S -->|Triggers Daily Job at 4:00 AM| D
+    D -->|Fetches Latest Validation Data| M
+    M -->|Predicts on New Data| E
+    
+    E -->|Drift Score > Threshold| Alert["⚠️ Model Decay Detected!"]:::monitor
+    E -->|Drift Score < Safe| OK["✅ Model is Healthy<br/>Skip Retraining"]:::success
+    
+    Alert -->|Pull 730+ Days History| D2["📚 Deep Retraining Initiated"]:::data
+    D2 -->|Train Champion Model| M2["⚙️ Train New LSTM"]:::model
+    M2 -->|Register & Tag 'Production'| ML
 ```
 
 ---
