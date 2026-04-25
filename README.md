@@ -62,8 +62,6 @@ Every tool in this repository was carefully selected to replicate a professional
 
 The architecture is highly decoupled, ensuring the React frontend remains lightning-fast while heavy tensor computations occur asynchronously.
 
-![System Architecture](assets/branded_architecture.png)
-
 ### Core System Flow
 
 ```mermaid
@@ -75,14 +73,12 @@ graph TD
     classDef fastapi fill:#009688,stroke:#333,stroke-width:2px,color:#fff,font-weight:bold;
     classDef tensorflow fill:#FF6F00,stroke:#333,stroke-width:2px,color:#fff,font-weight:bold;
     classDef mlflow fill:#0194E2,stroke:#333,stroke-width:2px,color:#fff,font-weight:bold;
-    classDef docker fill:#2496ED,stroke:#333,stroke-width:2px,color:#fff,font-weight:bold;
     classDef dvc fill:#945DD6,stroke:#333,stroke-width:2px,color:#fff,font-weight:bold;
+    classDef airflow fill:#017CEE,stroke:#333,stroke-width:2px,color:#fff,font-weight:bold;
+    classDef grafana fill:#F46800,stroke:#333,stroke-width:2px,color:#fff,font-weight:bold;
     classDef groq fill:#F55036,stroke:#333,stroke-width:2px,color:#fff,font-weight:bold;
     classDef db fill:#333333,stroke:#00B8FF,stroke-width:2px,color:#fff,font-weight:bold;
-    classDef logo fill:none,stroke:none,color:transparent;
-
-    %% Logo in Corner
-    LOGO["<img src='https://raw.githubusercontent.com/Naveenkumar-2007/Ai-stocks/main/frontend/public/assets/logo-dark.jpg' width='140'/>"]:::logo
+    classDef logo fill:none,stroke:none,color:#fff,font-weight:bold,font-size:16px;
 
     subgraph ClientLayer ["1. Client Layer"]
         A["<img src='https://upload.wikimedia.org/wikipedia/commons/a/a7/React-icon.svg' width='20'/> React.js Frontend"]:::react
@@ -95,7 +91,8 @@ graph TD
     end
 
     subgraph MLOpsLayer ["3. Data & MLOps Pipeline"]
-        E["DVC Orchestrator"]:::dvc
+        E["<img src='https://upload.wikimedia.org/wikipedia/commons/d/de/AirflowLogo.png' width='20'/> Apache Airflow"]:::airflow
+        E2["DVC Orchestrator"]:::dvc
         F["<img src='https://upload.wikimedia.org/wikipedia/commons/2/2d/Tensorflow_logo.svg' width='20'/> TensorFlow LSTM Models"]:::tensorflow
         G["<img src='https://upload.wikimedia.org/wikipedia/commons/f/fe/Mlflow-logo.svg' width='20'/> MLflow Registry"]:::mlflow
         H[("Local Model Storage")]:::db
@@ -106,15 +103,20 @@ graph TD
         J["LangChain Engine"]:::fastapi
         K["Groq Llama 3 LLM"]:::groq
     end
+    
+    subgraph MonitoringLayer ["5. Monitoring"]
+        N["<img src='https://upload.wikimedia.org/wikipedia/commons/a/a1/Grafana_logo.svg' width='20'/> Grafana Dashboards"]:::grafana
+    end
 
-    subgraph ExternalLayer ["5. External Financial Data"]
+    subgraph ExternalLayer ["6. External Financial Data"]
         L["TwelveData API"]:::db
         M["Finnhub API"]:::db
     end
 
-    %% Wiring
-    LOGO ~~~ ClientLayer
+    %% Logo at the bottom
+    LOGO["<img src='https://raw.githubusercontent.com/Naveenkumar-2007/Ai-stocks/main/frontend/public/assets/logo-dark.jpg' width='140'/><br/>AI Stock Predictor & Quantitative MLOps Platform"]:::logo
 
+    %% Wiring
     A <-->|Auth Token| B
     A -->|Fetch Stock Predictions| C
     A -->|Chat with AI| D
@@ -122,15 +124,19 @@ graph TD
     C <-->|Get Live Prices| L
     C <-->|Get Live News| M
     C -->|Load Best Model| H
+    C -->|Emit Metrics| N
 
     D <-->|Fetch Live Context| M
     D <-->|Semantic Search| I
     D -->|Build Prompt| J
     J <-->|Stream Response| K
 
-    E -->|Trigger Daily Training| F
+    E -->|Schedules| E2
+    E2 -->|Trigger Daily Training| F
     F -->|Log Accuracy Metrics| G
     F -->|Save .keras files| H
+    
+    ExternalLayer ~~~ LOGO
 ```
 
 ---
