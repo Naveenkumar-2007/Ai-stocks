@@ -1,1 +1,18 @@
-name: Sync to Hugging Face Space`n`non:`n  push:`n    branches: [main]`n  workflow_dispatch:`n`njobs:`n  sync-to-hub:`n    runs-on: ubuntu-latest`n    steps:`n      - uses: actions/checkout@v3`n        with:`n          fetch-depth: 0`n          lfs: true`n      - name: Push to hub`n        env:`n          HF_TOKEN: ${{ secrets.HF_TOKEN }}`n        run: git push https://Naveen-2007:$HF_TOKEN@huggingface.co/spaces/Naveen-2007/ai-stock-predictor main --force
+name: Sync to Hugging Face Space
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  sync-to-hub:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+          lfs: true
+      - name: Push to hub
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: git push https://Naveen-2007:$HF_TOKEN@huggingface.co/spaces/Naveen-2007/ai-stock-predictor main --force
