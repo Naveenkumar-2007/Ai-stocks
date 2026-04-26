@@ -220,7 +220,6 @@ def firebase_auth_required(admin_only: bool = False):
             
             # Enterprise: Auto-register user in DB if they don't exist
             try:
-                from database import db_session
                 from models import User
                 email = decoded.get('email')
                 uid = decoded.get('uid')
@@ -276,7 +275,6 @@ def load_lstm_model(ticker):
         MLOpsConfig.add_stock(ticker)
         # Also sync to ActiveTicker DB for admin dashboard visibility
         try:
-            from database import db_session
             from models import ActiveTicker
             existing = db_session.query(ActiveTicker).filter_by(ticker=ticker).first()
             if not existing:
@@ -726,7 +724,6 @@ def get_stock_data(ticker):
                 token = auth_header.split(' ', 1)[1].strip()
                 decoded = firebase_auth.verify_id_token(token)
                 uid = decoded.get('uid')
-                from database import db_session
                 from models import User
                 user = db_session.query(User).filter_by(firebase_uid=uid).first()
                 if user:
@@ -735,6 +732,10 @@ def get_stock_data(ticker):
                 pass
 
         resolved_ticker = requested_ticker
+        resolved_exchange = None
+        resolved_country = None
+        data_provider = None
+        provider_message = None
 
         candidates = [{'symbol': requested_ticker, 'exchange': None, 'country': None}]
         seen_candidates = {(requested_ticker, None)}
@@ -850,7 +851,6 @@ def get_stock_data(ticker):
             MLOpsConfig.add_stock(resolved_ticker)
             # Also sync to ActiveTicker DB for admin dashboard visibility
             try:
-                from database import db_session
                 from models import ActiveTicker
                 existing = db_session.query(ActiveTicker).filter_by(ticker=resolved_ticker).first()
                 if not existing:
@@ -863,7 +863,6 @@ def get_stock_data(ticker):
 
         # Enterprise Analytics: Log this prediction search
         try:
-            from database import db_session
             from models import PredictionLog
             log_entry = PredictionLog(user_id=user_id, ticker=resolved_ticker)
             db_session.add(log_entry)
@@ -1341,7 +1340,6 @@ def get_stock_data(ticker):
 
         # Enterprise Analytics: Log this prediction search
         try:
-            from database import db_session
             from models import PredictionLog, User
             user_id = None
             if hasattr(g, 'firebase_user') and g.firebase_user:
