@@ -11,6 +11,10 @@ try:
 except ImportError:
     PSUTIL_AVAILABLE = False
 import time
+import secrets
+
+# Generate an unguessable fallback password to prevent unauthorized access if the env variable is missing
+DEFAULT_SECURE_PASSWORD = secrets.token_hex(32)
 
 admin_bp = Blueprint('admin', __name__, url_prefix='/api/admin')
 
@@ -74,8 +78,8 @@ def verify_admin():
     """Enterprise feature: Secure Master Password verification."""
     data = request.get_json(silent=True) or {}
     password = str(data.get('password', '')).strip()
-    # Use environment variable for master password, fallback to a strong default for demo
-    master_password = str(os.getenv('ADMIN_MASTER_PASSWORD', 'AiStocks@Admin2026')).strip().strip('"').strip("'")
+    # Use environment variable for master password, fallback to secure random token
+    master_password = str(os.getenv('ADMIN_MASTER_PASSWORD', DEFAULT_SECURE_PASSWORD)).strip().strip('"').strip("'")
     
     if password == master_password:
         return jsonify({"success": True})
