@@ -140,7 +140,7 @@ except Exception as e:
 
 # Configure Flask to serve React build (optimized)
 os.makedirs('cache', exist_ok=True)
-application = Flask(__name__, static_folder='build', static_url_path='')
+application = Flask(__name__, static_folder='build', static_url_path='/static_bypass')
 app = application
 
 # --- Database & Admin Setup ---
