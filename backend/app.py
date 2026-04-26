@@ -231,12 +231,22 @@ def load_lstm_model(ticker):
     if not ticker:
         return None
     
-    # NEW: Register interest in this ticker immediately (adds to stocks.json)
+    # NEW: Register interest in this ticker immediately (adds to stocks.json + DB)
     try:
         from mlops.config import MLOpsConfig
         MLOpsConfig.add_stock(ticker)
+        # Also sync to ActiveTicker DB for admin dashboard visibility
+        try:
+            from database import db_session
+            from models import ActiveTicker
+            existing = db_session.query(ActiveTicker).filter_by(ticker=ticker).first()
+            if not existing:
+                db_session.add(ActiveTicker(ticker=ticker, is_active=True))
+                db_session.commit()
+        except Exception:
+            db_session.rollback()
     except Exception as e:
-        print(f"⚠️ Failed to register ticker {ticker} in stocks.json: {e}")
+        print(f"Failed to register ticker {ticker}: {e}")
     
     # Return cached model if already loaded for this ticker
     if ticker in _model_cache:
@@ -251,7 +261,7 @@ def load_lstm_model(ticker):
             registry = ModelRegistry()
             best = registry.get_best_model(ticker)
             if best and os.path.exists(best.get('model_path', '')):
-                print(f"Loading model from registry for {ticker}: {best['version_id']}")
+                print(f"Loading model from registry for {ticker}: {best.get('version_id', best.get('version', 'unknown'))}")
                 from tensorflow.keras.models import load_model as keras_load
                 loaded_model = keras_load(best['model_path'])
                 _model_cache[ticker] = loaded_model
@@ -786,6 +796,16 @@ def get_stock_data(ticker):
         try:
             from mlops.config import MLOpsConfig
             MLOpsConfig.add_stock(resolved_ticker)
+            # Also sync to ActiveTicker DB for admin dashboard visibility
+            try:
+                from database import db_session
+                from models import ActiveTicker
+                existing = db_session.query(ActiveTicker).filter_by(ticker=resolved_ticker).first()
+                if not existing:
+                    db_session.add(ActiveTicker(ticker=resolved_ticker, is_active=True))
+                    db_session.commit()
+            except Exception:
+                db_session.rollback()
         except Exception as add_exc:
             print(f"Ticker persistence warning for {resolved_ticker}: {add_exc}")
 

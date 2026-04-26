@@ -83,7 +83,7 @@ def verify_admin():
     
     if password == master_password:
         return jsonify({"success": True})
-    return jsonify({"success": False, "error": f"Invalid master password (expected_len: {len(master_password)}, provided_len: {len(password)})"}), 401
+    return jsonify({"success": False, "error": "Invalid master password"}), 401
 
 @admin_bp.route('/users', methods=['GET'])
 def get_users():
@@ -159,14 +159,20 @@ def force_retrain(ticker):
             pipeline = MLOpsTrainingPipeline()
             pipeline.train_model(ticker=ticker, epochs=20, days=730)
             
+            import datetime
             db_ticker = db_session.query(ActiveTicker).filter_by(ticker=ticker).first()
             if db_ticker:
-                import datetime
                 db_ticker.last_trained_date = datetime.datetime.utcnow()
                 db_ticker.current_drift_score = 0.0
-                db_session.commit()
+            else:
+                db_session.add(ActiveTicker(
+                    ticker=ticker, is_active=True,
+                    last_trained_date=datetime.datetime.utcnow(),
+                    current_drift_score=0.0
+                ))
+            db_session.commit()
         except Exception as e:
-            print(f"[ADMIN] ❌ Force retraining failed: {e}")
+            print(f"[ADMIN] Force retraining failed: {e}")
             
     threading.Thread(target=background_train, daemon=True).start()
     return jsonify({"success": True, "message": f"Force retrain triggered in background for {ticker}."})
