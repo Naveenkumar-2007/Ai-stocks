@@ -51,5 +51,13 @@ class ChatMessage(Base):
     sender = Column(String(50), nullable=False) # 'user' or 'ai'
     content = Column(Text, nullable=False)
     timestamp = Column(DateTime, default=datetime.datetime.utcnow)
-    
     session = relationship("ChatSession", back_populates="messages")
+
+class PredictionLog(Base):
+    """Tracks every time a user searches/predicts a stock for global analytics."""
+    __tablename__ = 'prediction_logs'
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=True) # Null if anonymous
+    ticker = Column(String(20), index=True, nullable=False)
+    timestamp = Column(DateTime, default=datetime.datetime.utcnow)
+

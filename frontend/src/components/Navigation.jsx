@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { TrendingUp, BarChart3, Activity, Menu, X, Home, Info, User, Sun, Moon } from 'lucide-react';
+import { TrendingUp, BarChart3, Activity, Menu, X, Home, Info, User, Sun, Moon, Shield } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 
@@ -133,15 +133,17 @@ const Navigation = () => {
             </button>
 
             {currentUser ? (
-              <Link
-                to="/profile"
+              <div className="flex items-center gap-2">
+                <Link
+                  to="/profile"
                 className="flex items-center gap-2 px-3 py-2 rounded-full hover:bg-gray-100 dark:hover:bg-dark-elevated transition-colors"
               >
                 <div className="w-8 h-8 bg-gradient-to-br from-cyan-500 to-cyan-600 rounded-full flex items-center justify-center text-white font-semibold text-sm shadow-lg">
                   {getUserInitial()}
                 </div>
                 <span className="text-sm font-medium text-gray-700 dark:text-gray-200">{getUserName()}</span>
-              </Link>
+                </Link>
+              </div>
             ) : (
               <div className="flex items-center gap-2">
                 <Link to="/login" className="px-4 py-2 text-sm font-medium text-gray-600 dark:text-gray-300 hover:text-cyan-600 dark:hover:text-cyan-400">

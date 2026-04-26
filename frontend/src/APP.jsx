@@ -12,6 +12,7 @@ import ForgotPassword from './pages/ForgotPassword';
 import Footer from './components/Footer';
 import ProtectedRoute from './components/ProtectedRoute';
 import ChatBot from './components/ChatBot';
+import AdminDashboard from './pages/AdminDashboard';
 import { AuthProvider } from './contexts/AuthContext';
 import { ThemeProvider } from './contexts/ThemeContext';
 import CinematicBackground from './components/CinematicBackground';
@@ -54,6 +55,14 @@ function App() {
                   element={(
                     <ProtectedRoute>
                       <ChangePassword />
+                    </ProtectedRoute>
+                  )}
+                />
+                <Route
+                  path="/admin"
+                  element={(
+                    <ProtectedRoute>
+                      <AdminDashboard />
                     </ProtectedRoute>
                   )}
                 />

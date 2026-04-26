@@ -1220,6 +1220,7 @@ def get_stock_data(ticker):
             'day_change_percent': safe_float(day_change_percent),
             'volume': volume,
             'predicted_volume': predicted_volumes,
+            'is_training': len(predictions) == 0,
             'market_cap': market_cap,
             'pe_ratio': safe_float(pe_ratio) if isinstance(pe_ratio, (int, float)) and not pd.isna(pe_ratio) else None,
             'days_predicted': days,
@@ -1257,6 +1258,22 @@ def get_stock_data(ticker):
             response['quote_symbol_used'] = quote_symbol_used
         if app.debug and metrics_symbol_used:
             response['metrics_symbol_used'] = metrics_symbol_used
+
+        # Enterprise Analytics: Log this prediction search
+        try:
+            from database import db_session
+            from models import PredictionLog, User
+            user_id = None
+            if hasattr(g, 'firebase_user') and g.firebase_user:
+                email = g.firebase_user.get('email')
+                user = db_session.query(User).filter_by(email=email).first()
+                if user:
+                    user_id = user.id
+            log_entry = PredictionLog(user_id=user_id, ticker=resolved_ticker)
+            db_session.add(log_entry)
+            db_session.commit()
+        except Exception as log_err:
+            print(f"Failed to log prediction to db: {log_err}")
 
         return jsonify(response)
 
@@ -1342,11 +1359,9 @@ def predict_multi_day_lstm(hist, current_price, days, ticker):
         current_model = load_lstm_model(ticker)
         
         if current_model is None:
-            for day in range(days):
-                pred = predict_with_technical_analysis(hist, current_price)
-                predictions.append(pred)
-                current_price = pred
-            return predictions
+            # User specifically requested NOT to give mathematical calculations as a fallback.
+            # Instead, we return an empty list to indicate that the model is still training in the background.
+            return []
         
         # Determine the model's expected input feature count
         expected_features = current_model.input_shape[-1]  # last dim of (batch, seq, features)
