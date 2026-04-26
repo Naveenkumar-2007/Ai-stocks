@@ -726,6 +726,7 @@ def get_stock_data(ticker):
                 token = auth_header.split(' ', 1)[1].strip()
                 decoded = firebase_auth.verify_id_token(token)
                 uid = decoded.get('uid')
+                from database import db_session
                 from models import User
                 user = db_session.query(User).filter_by(firebase_uid=uid).first()
                 if user:
