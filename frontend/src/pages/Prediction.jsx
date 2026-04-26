@@ -421,9 +421,19 @@ function Prediction() {
   const fetchStockData = async (symbol) => {
     setLoading(true);
     setError(null);
+    const headers = {};
+    if (currentUser) {
+      try {
+        const token = await currentUser.getIdToken();
+        headers.Authorization = `Bearer ${token}`;
+      } catch (err) {
+        console.error('Failed to get token for prediction call', err);
+      }
+    }
+
     try {
       const [stockRes, sentimentRes, newsRes] = await Promise.all([
-        axios.get(`${API_BASE}/api/stock/${symbol}?days=${days}`, { timeout: 45000 }),
+        axios.get(`${API_BASE}/api/stock/${symbol}?days=${days}`, { headers, timeout: 45000 }),
         axios.get(`${API_BASE}/api/sentiment/${symbol}`, { timeout: 15000 }).catch(() => ({ data: { sentiment: null } })),
         axios.get(`${API_BASE}/api/news/${symbol}?days=7`, { timeout: 15000 }).catch(() => ({ data: { news: [] } }))
       ]);

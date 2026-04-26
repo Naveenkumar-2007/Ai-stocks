@@ -134,9 +134,9 @@ print("=" * 60)
 try:
     from scheduler import scheduler
     scheduler.start()
-    print("✅ Automatic model training started (runs daily with startup catch-up)")
+    print("Automatic model training started (runs daily with startup catch-up)")
 except Exception as e:
-    print(f"⚠️ Could not start training scheduler: {e}")
+    print(f"Could not start training scheduler: {e}")
 
 # Configure Flask to serve React build (optimized)
 os.makedirs('cache', exist_ok=True)
@@ -152,6 +152,20 @@ app.register_blueprint(admin_bp)
 @app.teardown_appcontext
 def shutdown_session(exception=None):
     db_session.remove()
+
+# Seed initial stocks if table is empty
+try:
+    from models import ActiveTicker
+    if db_session.query(ActiveTicker).count() == 0:
+        initial_stocks = ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA', 'NVDA']
+        for s in initial_stocks:
+            db_session.add(ActiveTicker(ticker=s, is_active=True))
+        db_session.commit()
+        print(f"Seeded {len(initial_stocks)} initial stocks into database.")
+except Exception as e:
+    print(f"Could not seed database: {e}")
+    db_session.rollback()
+
 print("SQLAlchemy Database & Admin API initialized.")
 
 configure_logging(app)
@@ -203,11 +217,36 @@ def firebase_auth_required(admin_only: bool = False):
                 return jsonify({'success': False, 'error': 'Insufficient privileges'}), 403
 
             g.firebase_user = decoded
+            
+            # Enterprise: Auto-register user in DB if they don't exist
+            try:
+                from database import db_session
+                from models import User
+                email = decoded.get('email')
+                uid = decoded.get('uid')
+                if uid:
+                    user = db_session.query(User).filter_by(firebase_uid=uid).first()
+                    if not user:
+                        role = "admin" if email and email.lower() in ADMIN_EMAILS else "user"
+                        user = User(firebase_uid=uid, email=email, role=role)
+                        db_session.add(user)
+                        db_session.commit()
+            except Exception as db_err:
+                app.logger.error(f"Failed to auto-register user: {db_err}")
+                db_session.rollback()
+
             return func(*args, **kwargs)
 
         return wrapper
 
     return decorator
+
+
+@app.route('/api/auth/sync', methods=['POST'])
+@firebase_auth_required(admin_only=False)
+def sync_user():
+    """Endpoint to explicitly sync/register user in the SQL database."""
+    return jsonify({"success": True, "message": "User synchronized successfully."})
 
 
 @app.errorhandler(HTTPException)
@@ -678,11 +717,23 @@ def get_stock_data(ticker):
     
     try:
         requested_ticker = ticker.upper()
+        
+        # Optional: Try to identify user for logging even if auth is not strictly required
+        auth_header = request.headers.get('Authorization', '')
+        user_id = None
+        if auth_header.startswith('Bearer '):
+            try:
+                token = auth_header.split(' ', 1)[1].strip()
+                decoded = firebase_auth.verify_id_token(token)
+                uid = decoded.get('uid')
+                from models import User
+                user = db_session.query(User).filter_by(firebase_uid=uid).first()
+                if user:
+                    user_id = user.id
+            except Exception:
+                pass
+
         resolved_ticker = requested_ticker
-        resolved_exchange = None
-        resolved_country = None
-        data_provider = None
-        provider_message = None
 
         candidates = [{'symbol': requested_ticker, 'exchange': None, 'country': None}]
         seen_candidates = {(requested_ticker, None)}
@@ -808,6 +859,17 @@ def get_stock_data(ticker):
                 db_session.rollback()
         except Exception as add_exc:
             print(f"Ticker persistence warning for {resolved_ticker}: {add_exc}")
+
+        # Enterprise Analytics: Log this prediction search
+        try:
+            from database import db_session
+            from models import PredictionLog
+            log_entry = PredictionLog(user_id=user_id, ticker=resolved_ticker)
+            db_session.add(log_entry)
+            db_session.commit()
+        except Exception as log_err:
+            print(f"Failed to log prediction to db: {log_err}")
+            db_session.rollback()
 
         if provider_message:
             print(f"Provider note: {provider_message}")

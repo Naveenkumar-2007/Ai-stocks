@@ -170,21 +170,21 @@ class ModelTrainingScheduler:
             if len(self.training_results) > 24:
                 self.training_results = self.training_results[-24:]
             
-            logger.info(f"✅ [MLOps] Training completed: {result_summary['total_trained']} models updated.")
+            logger.info(f"[MLOps] Training completed: {result_summary['total_trained']} models updated.")
                 
         except Exception as e:
-            logger.error(f"❌ [MLOps] Critical error in scheduler job: {e}")
+            logger.error(f"[MLOps] Critical error in scheduler job: {e}")
     
     def run_scheduler(self):
         """Run the scheduler loop with Airflow-aligned default timing."""
         logger.info(
-            "🚀 MLOps Scheduler Started — Training at %s UTC (%s)",
+            "MLOps Scheduler Started - Training at %s UTC (%s)",
             self.training_time_utc,
             "weekdays" if self.weekdays_only else "daily"
         )
 
         if self.enable_startup_catchup and self._should_run_startup_catchup():
-            logger.info("⏱️ Startup catch-up triggered: running today's missed training cycle now.")
+            logger.info("Startup catch-up triggered: running today's missed training cycle now.")
             self.train_models_job()
         
         # Keep default behavior aligned with Airflow DAG: weekdays at configured UTC time.
@@ -231,9 +231,9 @@ class ModelTrainingScheduler:
             self.is_running = True
             self.thread = threading.Thread(target=self.run_scheduler, daemon=True)
             self.thread.start()
-            logger.info("✅ MLOps Scheduler thread backgrounded (Primary Worker)")
+            logger.info("MLOps Scheduler thread backgrounded (Primary Worker)")
         except Exception as e:
-            logger.error(f"⚠️ Failed to start MLOps Scheduler: {e}")
+            logger.error(f"Failed to start MLOps Scheduler: {e}")
     
     def stop(self):
         """Stop the scheduler"""

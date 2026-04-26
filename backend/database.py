@@ -22,4 +22,4 @@ def init_db():
     # they will be registered properly on the metadata.
     import models
     Base.metadata.create_all(bind=engine)
-    print(f"✅ Database initialized successfully at {DATABASE_URL}")
+    print(f"Database initialized successfully at {DATABASE_URL}")

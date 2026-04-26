@@ -14,6 +14,8 @@ import {
 } from '../firebase/config';
 
 const AuthContext = createContext(null);
+const API_BASE_URL = process.env.REACT_APP_API_URL || (process.env.NODE_ENV === 'production' ? '' : 'http://localhost:8000');
+
 
 export const useAuth = () => {
   const context = useContext(AuthContext);
@@ -125,6 +127,16 @@ export const AuthProvider = ({ children }) => {
       setCurrentUser(user);
       if (user) {
         await refreshClaims(user);
+        // Sync user with backend DB
+        try {
+          const token = await user.getIdToken();
+          fetch(`${API_BASE_URL}/api/auth/sync`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}` }
+          }).catch(err => console.error('Sync failed:', err));
+        } catch (err) {
+          console.error('Failed to get token for sync:', err);
+        }
       } else {
         setClaims(null);
         setIsAdmin(false);
