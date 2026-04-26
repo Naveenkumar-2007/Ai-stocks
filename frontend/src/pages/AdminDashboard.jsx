@@ -47,7 +47,7 @@ function AdminDashboard() {
         sessionStorage.setItem('adminUnlocked', 'true');
         setIsLocked(false);
       } else {
-        setLockError('ACCESS DENIED: Invalid Master Security Protocol.');
+        setLockError(`ACCESS DENIED: ${data.error || 'Invalid Master Security Protocol.'}`);
       }
     } catch (err) {
       setLockError('Server connection failed. Is the Flask backend running?');

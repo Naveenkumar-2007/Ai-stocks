@@ -63,14 +63,14 @@ def get_admin_stats():
 @admin_bp.route('/verify', methods=['POST'])
 def verify_admin():
     """Enterprise feature: Secure Master Password verification."""
-    data = request.json
+    data = request.get_json(silent=True) or {}
     password = str(data.get('password', '')).strip()
     # Use environment variable for master password, fallback to a strong default for demo
     master_password = str(os.getenv('ADMIN_MASTER_PASSWORD', 'AiStocks@Admin2026')).strip().strip('"').strip("'")
     
     if password == master_password:
         return jsonify({"success": True})
-    return jsonify({"success": False, "error": "Invalid master password"}), 401
+    return jsonify({"success": False, "error": f"Invalid master password (expected_len: {len(master_password)}, provided_len: {len(password)})"}), 401
 
 @admin_bp.route('/users', methods=['GET'])
 def get_users():
