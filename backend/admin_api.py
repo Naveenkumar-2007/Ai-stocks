@@ -5,7 +5,11 @@ from sqlalchemy import func
 import datetime
 import threading
 import os
-import psutil
+try:
+    import psutil
+    PSUTIL_AVAILABLE = True
+except ImportError:
+    PSUTIL_AVAILABLE = False
 import time
 
 admin_bp = Blueprint('admin', __name__, url_prefix='/api/admin')
@@ -25,8 +29,13 @@ def get_admin_stats():
     uptime_hours = round(uptime_seconds / 3600, 2)
     
     # CPU & RAM Usage
-    cpu_usage = psutil.cpu_percent()
-    ram = psutil.virtual_memory()
+    if PSUTIL_AVAILABLE:
+        cpu_usage = psutil.cpu_percent()
+        ram = psutil.virtual_memory()
+        ram_usage_percent = ram.percent
+    else:
+        cpu_usage = 0.0
+        ram_usage_percent = 0.0
     
     # All-Time Searched Stocks
     all_time_query = db_session.query(
@@ -54,7 +63,7 @@ def get_admin_stats():
             "api_health": "Optimal",
             "uptime_hours": uptime_hours,
             "cpu_usage": cpu_usage,
-            "ram_usage_percent": ram.percent,
+            "ram_usage_percent": ram_usage_percent,
             "top_searched_stocks_all_time": top_stocks_all_time,
             "trending_stocks": trending_stocks
         }
