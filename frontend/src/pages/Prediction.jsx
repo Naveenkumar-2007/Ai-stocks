@@ -1386,52 +1386,63 @@ function Prediction() {
               {/* Professional Forecast Table */}
               <div className="bg-white dark:bg-gray-800 rounded-xl sm:rounded-2xl shadow-lg p-4 sm:p-6 border border-gray-200 dark:border-gray-700">
                 <h3 className="text-base sm:text-lg lg:text-xl font-bold text-gray-900 dark:text-white mb-3 sm:mb-4">Forecast Signals</h3>
-                <div className="overflow-x-auto table-container bg-gray-50 dark:bg-gray-900 rounded-lg">
-                  <table className="min-w-full text-left text-xs sm:text-sm">
-                    <thead>
-                      <tr className="bg-gradient-to-r from-gray-100 to-gray-50 dark:from-gray-700 dark:to-gray-800 text-gray-700 dark:text-gray-300 uppercase text-xs font-bold border-b-2 border-gray-200 dark:border-gray-600">
-                        <th className="px-3 sm:px-4 py-3 sm:py-4">Date</th>
-                        <th className="px-3 sm:px-4 py-3 sm:py-4">Signal</th>
-                        <th className="px-3 sm:px-4 py-3 sm:py-4">Predicted</th>
-                        <th className="px-3 sm:px-4 py-3 sm:py-4">Δ Price</th>
-                        <th className="px-3 sm:px-4 py-3 sm:py-4">Δ %</th>
-                      </tr>
-                    </thead>
-                    <tbody className="bg-white dark:bg-gray-800">
-                      {predictionRows.length === 0 && (
-                        <tr>
-                          <td colSpan={5} className="px-3 sm:px-4 py-3 sm:py-4 text-center text-gray-500 dark:text-gray-400">
-                            No forecast data available.
-                          </td>
+                
+                {stockData.is_training ? (
+                  <div className="bg-blue-50 dark:bg-blue-900/20 border-2 border-blue-200 dark:border-blue-500/30 rounded-xl p-8 text-center animate-pulse">
+                    <i className="fas fa-robot text-4xl text-blue-500 mb-4 animate-bounce"></i>
+                    <h4 className="text-xl font-bold text-gray-900 dark:text-white mb-2">AI Model Training in Progress</h4>
+                    <p className="text-gray-600 dark:text-gray-400 font-medium max-w-md mx-auto">
+                      This stock has never been searched before. Our background MLOps pipeline is currently analyzing historical data and training a custom LSTM neural network specifically for {stockData.ticker}. Please check back in a few minutes!
+                    </p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto table-container bg-gray-50 dark:bg-gray-900 rounded-lg">
+                    <table className="min-w-full text-left text-xs sm:text-sm">
+                      <thead>
+                        <tr className="bg-gradient-to-r from-gray-100 to-gray-50 dark:from-gray-700 dark:to-gray-800 text-gray-700 dark:text-gray-300 uppercase text-xs font-bold border-b-2 border-gray-200 dark:border-gray-600">
+                          <th className="px-3 sm:px-4 py-3 sm:py-4">Date</th>
+                          <th className="px-3 sm:px-4 py-3 sm:py-4">Signal</th>
+                          <th className="px-3 sm:px-4 py-3 sm:py-4">Predicted</th>
+                          <th className="px-3 sm:px-4 py-3 sm:py-4">Δ Price</th>
+                          <th className="px-3 sm:px-4 py-3 sm:py-4">Δ %</th>
                         </tr>
-                      )}
-                      {predictionRows.map((row) => (
-                        <tr key={row.id} className="border-t border-gray-200 dark:border-gray-700 hover:bg-gradient-to-r hover:from-gray-50 hover:to-transparent dark:hover:from-gray-700 dark:hover:to-transparent transition-all duration-200">
-                          <td className="px-3 sm:px-4 py-3 sm:py-4 font-semibold text-gray-900 dark:text-gray-100 whitespace-nowrap">{row.dateLabel}</td>
-                          <td className="px-3 sm:px-4 py-3 sm:py-4">
-                            <span
-                              className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap shadow-sm ${row.signal.includes('BUY')
-                                ? 'bg-gradient-to-r from-green-500 to-green-600 text-white'
-                                : row.signal.includes('SELL')
-                                  ? 'bg-gradient-to-r from-red-500 to-red-600 text-white'
-                                  : 'bg-gradient-to-r from-gray-400 to-gray-500 text-white'
-                                }`}
-                            >
-                              {row.signal}
-                            </span>
-                          </td>
-                          <td className="px-3 sm:px-4 py-3 sm:py-4 text-gray-900 dark:text-gray-100 font-bold whitespace-nowrap">${row.price}</td>
-                          <td className={`px-3 sm:px-4 py-3 sm:py-4 font-bold whitespace-nowrap ${Number(row.change) >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                            {Number(row.change) >= 0 ? '+' : ''}${row.change}
-                          </td>
-                          <td className={`px-3 sm:px-4 py-3 sm:py-4 font-bold whitespace-nowrap ${Number(row.changePercent) >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                            {Number(row.changePercent) >= 0 ? '+' : ''}{row.changePercent}%
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                      </thead>
+                      <tbody className="bg-white dark:bg-gray-800">
+                        {predictionRows.length === 0 && (
+                          <tr>
+                            <td colSpan={5} className="px-3 sm:px-4 py-3 sm:py-4 text-center text-gray-500 dark:text-gray-400">
+                              No forecast data available.
+                            </td>
+                          </tr>
+                        )}
+                        {predictionRows.map((row) => (
+                          <tr key={row.id} className="border-t border-gray-200 dark:border-gray-700 hover:bg-gradient-to-r hover:from-gray-50 hover:to-transparent dark:hover:from-gray-700 dark:hover:to-transparent transition-all duration-200">
+                            <td className="px-3 sm:px-4 py-3 sm:py-4 font-semibold text-gray-900 dark:text-gray-100 whitespace-nowrap">{row.dateLabel}</td>
+                            <td className="px-3 sm:px-4 py-3 sm:py-4">
+                              <span
+                                className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap shadow-sm ${row.signal.includes('BUY')
+                                  ? 'bg-gradient-to-r from-green-500 to-green-600 text-white'
+                                  : row.signal.includes('SELL')
+                                    ? 'bg-gradient-to-r from-red-500 to-red-600 text-white'
+                                    : 'bg-gradient-to-r from-gray-400 to-gray-500 text-white'
+                                  }`}
+                              >
+                                {row.signal}
+                              </span>
+                            </td>
+                            <td className="px-3 sm:px-4 py-3 sm:py-4 text-gray-900 dark:text-gray-100 font-bold whitespace-nowrap">${row.price}</td>
+                            <td className={`px-3 sm:px-4 py-3 sm:py-4 font-bold whitespace-nowrap ${Number(row.change) >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                              {Number(row.change) >= 0 ? '+' : ''}${row.change}
+                            </td>
+                            <td className={`px-3 sm:px-4 py-3 sm:py-4 font-bold whitespace-nowrap ${Number(row.changePercent) >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                              {Number(row.changePercent) >= 0 ? '+' : ''}{row.changePercent}%
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             </div>
 
