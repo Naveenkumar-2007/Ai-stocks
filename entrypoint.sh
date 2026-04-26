@@ -40,9 +40,8 @@ fi
 
 # Start the chatbot FastAPI server in the background on port 8001
 echo "🤖 Starting chatbot server on port 8001..."
-export PYTHONPATH="/app/chatbot/app:/app:${PYTHONPATH:-}"
 cd /app/chatbot/app
-python -m uvicorn main:app --host 127.0.0.1 --port 8001 --workers 1 --log-level info 2>&1 &
+env PYTHONPATH="/app/chatbot/app:/app:${PYTHONPATH:-}" python -m uvicorn main:app --host 127.0.0.1 --port 8001 --workers 1 --log-level info 2>&1 &
 CHATBOT_PID=$!
 cd /app
 
