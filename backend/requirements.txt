@@ -48,3 +48,6 @@ redis==5.2.1
 
 # Keep TensorFlow runtime compatible with known protobuf constraints.
 protobuf>=4.25.3,<5
+
+# Database
+SQLAlchemy>=2.0.0

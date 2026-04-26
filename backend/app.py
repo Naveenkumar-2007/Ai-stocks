@@ -143,6 +143,20 @@ os.makedirs('cache', exist_ok=True)
 application = Flask(__name__, static_folder='build', static_url_path='')
 app = application
 
+# --- Database & Admin Setup ---
+try:
+    from database import init_db, db_session
+    init_db()
+    from admin_api import admin_bp
+    app.register_blueprint(admin_bp)
+    
+    @app.teardown_appcontext
+    def shutdown_session(exception=None):
+        db_session.remove()
+    print("✅ SQLAlchemy Database & Admin API initialized.")
+except ImportError as e:
+    print(f"⚠️ Could not initialize DB/Admin API: {e}")
+
 configure_logging(app)
 
 # Allow CORS from all origins for API endpoints
