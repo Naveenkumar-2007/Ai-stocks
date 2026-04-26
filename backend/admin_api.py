@@ -66,7 +66,7 @@ def verify_admin():
     data = request.json
     password = str(data.get('password', '')).strip()
     # Use environment variable for master password, fallback to a strong default for demo
-    master_password = str(os.getenv('ADMIN_MASTER_PASSWORD', 'AiStocks@Admin2026')).strip()
+    master_password = str(os.getenv('ADMIN_MASTER_PASSWORD', 'AiStocks@Admin2026')).strip().strip('"').strip("'")
     
     if password == master_password:
         return jsonify({"success": True})
