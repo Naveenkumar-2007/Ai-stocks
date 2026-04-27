@@ -1,6 +1,8 @@
 from flask import Flask, request, render_template, jsonify, send_from_directory, g
 from flask_cors import CORS
 import os
+import json
+import base64
 from datetime import datetime, timedelta
 import warnings
 import logging
@@ -117,13 +119,34 @@ def initialize_firebase_admin() -> bool:
     if firebase_admin._apps:  # type: ignore[attr-defined]
         return True
 
-    service_account_path = os.getenv('FIREBASE_SERVICE_ACCOUNT_PATH')
-    if not service_account_path or not os.path.exists(service_account_path):
-        return False
+    # Preferred for container platforms: full JSON in env var
+    service_account_json = os.getenv('FIREBASE_SERVICE_ACCOUNT_JSON')
+    if service_account_json:
+        try:
+            cred_dict = json.loads(service_account_json)
+            firebase_admin.initialize_app(credentials.Certificate(cred_dict))
+            return True
+        except Exception:
+            pass
 
-    cred = credentials.Certificate(service_account_path)
-    firebase_admin.initialize_app(cred)
-    return True
+    # Alternate format: base64-encoded JSON in env var
+    service_account_b64 = os.getenv('FIREBASE_SERVICE_ACCOUNT_JSON_B64')
+    if service_account_b64:
+        try:
+            decoded = base64.b64decode(service_account_b64).decode('utf-8')
+            cred_dict = json.loads(decoded)
+            firebase_admin.initialize_app(credentials.Certificate(cred_dict))
+            return True
+        except Exception:
+            pass
+
+    # Local/dev fallback from filesystem path
+    service_account_path = os.getenv('FIREBASE_SERVICE_ACCOUNT_PATH')
+    if service_account_path and os.path.exists(service_account_path):
+        firebase_admin.initialize_app(credentials.Certificate(service_account_path))
+        return True
+
+    return False
 
 
 print("=" * 60)
@@ -153,10 +176,11 @@ app.register_blueprint(admin_bp)
 def shutdown_session(exception=None):
     db_session.remove()
 
-# Seed initial stocks if table is empty
+# Optional startup seed for first-run local demos. Disabled by default in production.
 try:
     from models import ActiveTicker
-    if db_session.query(ActiveTicker).count() == 0:
+    seed_on_startup = os.getenv('SEED_INITIAL_STOCKS_ON_STARTUP', 'false').strip().lower() in ('1', 'true', 'yes', 'on')
+    if seed_on_startup and db_session.query(ActiveTicker).count() == 0:
         initial_stocks = ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA', 'NVDA']
         for s in initial_stocks:
             db_session.add(ActiveTicker(ticker=s, is_active=True))
@@ -290,6 +314,52 @@ def load_lstm_model(ticker):
         return _model_cache[ticker]
     
     loaded_model = None
+
+    def trigger_background_training():
+        with _training_state_lock:
+            should_start_training = ticker not in _training_in_progress
+            if should_start_training:
+                _training_in_progress.add(ticker)
+
+        if not should_start_training:
+            print(f"⏳ Training already in progress for {ticker}. Skipping duplicate trigger.")
+            return
+
+        print(f"🚀 No model for {ticker}. Triggering background training...")
+
+        def background_train():
+            try:
+                # Train V1 first (powers multi-day LSTM charting & prediction endpoints)
+                try:
+                    from mlops.training_pipeline import MLOpsTrainingPipeline
+                    pipeline = MLOpsTrainingPipeline()
+                    print(f"🚀 Background V1 training started for {ticker}")
+                    pipeline.train_model(ticker=ticker, epochs=20, days=730)
+                    print(f"✅ Background V1 training completed for {ticker}")
+                except Exception as v1_err:
+                    print(f"⚠️ Background V1 training failed for {ticker}: {v1_err}")
+
+                # Train V2 (powers inference metrics and drift detection)
+                from mlops_v2.training import TrainerV2
+                trainer = TrainerV2()
+                result = trainer.train_if_needed(ticker=ticker, force=True)
+                if result.trained:
+                    print(f"✅ Background v2 training completed for {ticker}")
+                else:
+                    print(f"⚠️ Background v2 training skipped for {ticker}: {result.reason}")
+            except Exception as e:
+                print(f"❌ Background training failed for {ticker}: {e}")
+            finally:
+                with _training_state_lock:
+                    _training_in_progress.discard(ticker)
+
+        def delayed_background_train():
+            import time
+            print(f"⏳ Waiting 10 seconds before starting background training for {ticker} to allow API response...")
+            time.sleep(10)
+            background_train()
+
+        threading.Thread(target=delayed_background_train, daemon=True).start()
     
     try:
         # FIRST: Try loading from MLOps registry (best versioned model for this ticker)
@@ -328,64 +398,15 @@ def load_lstm_model(ticker):
                 _model_cache[ticker] = loaded_model
                 return loaded_model
             else:
-                # If model not found, trigger at most one background training per ticker.
-                with _training_state_lock:
-                    should_start_training = ticker not in _training_in_progress
-                    if should_start_training:
-                        _training_in_progress.add(ticker)
-
-                if not should_start_training:
-                    print(f"⏳ Training already in progress for {ticker}. Skipping duplicate trigger.")
-                else:
-                    print(f"🚀 No model for {ticker}. Triggering background training...")
-                def background_train():
-                    try:
-                        # Train V1 first (powers multi-day LSTM charting & prediction endpoints)
-                        try:
-                            from mlops.training_pipeline import MLOpsTrainingPipeline
-                            pipeline = MLOpsTrainingPipeline()
-                            print(f"🚀 Background V1 training started for {ticker}")
-                            pipeline.train_model(ticker=ticker, epochs=20, days=730)
-                            print(f"✅ Background V1 training completed for {ticker}")
-                        except Exception as v1_err:
-                            print(f"⚠️ Background V1 training failed for {ticker}: {v1_err}")
-                            
-                        # Train V2 (powers inference metrics and drift detection)
-                        from mlops_v2.training import TrainerV2
-                        trainer = TrainerV2()
-                        result = trainer.train_if_needed(ticker=ticker, force=True)
-                        if result.trained:
-                            print(f"✅ Background v2 training completed for {ticker}")
-                        else:
-                            print(f"⚠️ Background v2 training skipped for {ticker}: {result.reason}")
-                    except Exception as e:
-                        print(f"❌ Background training failed for {ticker}: {e}")
-                    finally:
-                        with _training_state_lock:
-                            _training_in_progress.discard(ticker)
-
-                def delayed_background_train():
-                    import time
-                    print(f"⏳ Waiting 10 seconds before starting background training for {ticker} to allow API response...")
-                    time.sleep(10)
-                    background_train()
-                    
-                threading.Thread(target=delayed_background_train, daemon=True).start()
+                trigger_background_training()
                 
         except Exception as e:
             print(f"Registry lookup failed for {ticker}: {e}")
-        
-        # SECOND: Fall back to generic artifact file paths
-        from tensorflow.keras.models import load_model as keras_load
-        for model_path in MODEL_PATHS:
-            if os.path.exists(model_path):
-                print(f"Loading fallback model from {model_path} for {ticker}...")
-                loaded_model = keras_load(model_path)
-                print(f"✅ Fallback model loaded from {model_path}")
-                _model_cache[ticker] = loaded_model
-                break
-        else:
-            print(f"⚠️ No model found for {ticker}")
+
+        if loaded_model is None:
+            # Never use global fallback artifacts for arbitrary tickers.
+            trigger_background_training()
+            print(f"⚠️ No trained model available yet for {ticker}")
     except Exception as e:
         print(f"Error loading model for {ticker}: {e}")
     
@@ -419,18 +440,14 @@ def load_saved_scaler(ticker):
             _scaler_cache[ticker] = scaler
             return scaler
             
-        # 3. Try generic fallback scaler artifact
-        if os.path.exists(SCALER_PATH):
-            import joblib
-            scaler = joblib.load(SCALER_PATH)
-            _scaler_cache[ticker] = scaler
-            return scaler
+        # Intentionally no global scaler fallback for arbitrary tickers.
     except Exception as e:
         print(f"Could not load scaler for {ticker}: {e}")
     return None
 
 # Health check endpoint (minimal dependencies)
 @app.route('/health')
+@app.route('/api/health')
 def health_check():
     """Simple health check endpoint"""
     # Also check if chatbot server is reachable

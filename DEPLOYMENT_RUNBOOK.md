@@ -30,6 +30,8 @@ Core API providers:
 
 Auth and admin:
 - FIREBASE_SERVICE_ACCOUNT_PATH
+- FIREBASE_SERVICE_ACCOUNT_JSON (recommended for Hugging Face secrets)
+- FIREBASE_SERVICE_ACCOUNT_JSON_B64 (alternative)
 - ADMIN_EMAILS
 - ADMIN_MASTER_PASSWORD
 
@@ -167,6 +169,7 @@ $body = @{
   clear_prediction_logs = $true
   clear_active_tickers = $true
   wipe_mlflow_experiment = $true
+  wipe_all_mlflow_experiments = $true
   seed_stocks = @("AAPL","GOOGL","META","MSFT","NVDA")
 } | ConvertTo-Json -Depth 5
 

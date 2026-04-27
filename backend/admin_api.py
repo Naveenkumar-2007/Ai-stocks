@@ -200,7 +200,11 @@ def delete_user(user_id):
 @admin_bp.route('/models', methods=['GET'])
 def get_active_models():
     """Get all active models and their drift scores."""
-    tickers = db_session.query(ActiveTicker).all()
+    include_untrained = str(request.args.get('include_untrained', 'false')).strip().lower() in ('1', 'true', 'yes', 'on')
+    query = db_session.query(ActiveTicker).filter(ActiveTicker.is_active == True)
+    if not include_untrained:
+        query = query.filter(ActiveTicker.last_trained_date.isnot(None))
+    tickers = query.order_by(ActiveTicker.ticker.asc()).all()
     result = []
     for t in tickers:
         result.append({
@@ -395,6 +399,7 @@ def reset_mlops_state():
     clear_prediction_logs = bool(data.get('clear_prediction_logs', True))
     clear_active_tickers = bool(data.get('clear_active_tickers', True))
     wipe_mlflow_experiment = bool(data.get('wipe_mlflow_experiment', False))
+    wipe_all_mlflow_experiments = bool(data.get('wipe_all_mlflow_experiments', False))
     seed_stocks = data.get('seed_stocks', [])
     if not isinstance(seed_stocks, list):
         seed_stocks = []
@@ -443,19 +448,33 @@ def reset_mlops_state():
         db_session.rollback()
         return _json_nocache({"success": False, "error": f"DB reset failed: {exc}"}, 500)
 
-    mlflow_reset = {"attempted": False, "deleted_experiment": None, "error": None}
-    if wipe_mlflow_experiment:
+    mlflow_reset = {
+        "attempted": False,
+        "deleted_experiment": None,
+        "deleted_experiments": [],
+        "error": None
+    }
+    if wipe_mlflow_experiment or wipe_all_mlflow_experiments:
         mlflow_reset['attempted'] = True
         try:
             import mlflow
             from mlops.config import MLOpsConfig
             mlflow.set_tracking_uri(MLOpsConfig.MLFLOW_TRACKING_URI)
             client = mlflow.tracking.MlflowClient()
-            exp_name = os.getenv('MLFLOW_EXPERIMENT_NAME', 'Prediction_Lineage')
-            exp = client.get_experiment_by_name(exp_name)
-            if exp:
-                client.delete_experiment(exp.experiment_id)
-                mlflow_reset['deleted_experiment'] = exp_name
+
+            if wipe_all_mlflow_experiments:
+                for exp in client.search_experiments():
+                    # Skip non-active stages or protected default experiment only if needed.
+                    if getattr(exp, 'lifecycle_stage', 'active') != 'active':
+                        continue
+                    client.delete_experiment(exp.experiment_id)
+                    mlflow_reset['deleted_experiments'].append(exp.name)
+            else:
+                exp_name = os.getenv('MLFLOW_EXPERIMENT_NAME', 'Prediction_Lineage')
+                exp = client.get_experiment_by_name(exp_name)
+                if exp:
+                    client.delete_experiment(exp.experiment_id)
+                    mlflow_reset['deleted_experiment'] = exp_name
         except Exception as exc:
             mlflow_reset['error'] = str(exc)
 
