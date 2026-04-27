@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { Navigate } from 'react-router-dom';
@@ -24,13 +24,72 @@ function AdminDashboard() {
   const [users, setUsers] = useState([]);
   const [chatLogs, setChatLogs] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [verifyingIntegrations, setVerifyingIntegrations] = useState(false);
+  const [integrationReport, setIntegrationReport] = useState(null);
+  const [resettingMLOps, setResettingMLOps] = useState(false);
   const [scheduleTime, setScheduleTime] = useState('04:00'); // Default 4 AM IST
+
+  const buildNoCacheUrl = useCallback((path) => {
+    const sep = path.includes('?') ? '&' : '?';
+    return `${API_BASE_URL}${path}${sep}t=${Date.now()}`;
+  }, []);
+
+  const fetchStats = useCallback(async () => {
+    try {
+      const res = await fetch(buildNoCacheUrl('/api/admin/stats'), { cache: 'no-store' });
+      const data = await res.json();
+      if (data.success) setStats(data.metrics);
+    } catch (error) { console.error(error); }
+  }, [buildNoCacheUrl]);
+
+  const fetchModels = useCallback(async () => {
+    try {
+      const res = await fetch(buildNoCacheUrl('/api/admin/models'), { cache: 'no-store' });
+      const data = await res.json();
+      if (data.success) setModels(data.models);
+    } catch (error) { console.error(error); }
+  }, [buildNoCacheUrl]);
+
+  const fetchUsers = useCallback(async () => {
+    try {
+      const res = await fetch(buildNoCacheUrl('/api/admin/users'), { cache: 'no-store' });
+      const data = await res.json();
+      if (data.success) setUsers(data.users);
+    } catch (error) { console.error(error); }
+  }, [buildNoCacheUrl]);
+
+  const fetchChatLogs = useCallback(async () => {
+    try {
+      const res = await fetch(buildNoCacheUrl('/api/admin/chat_logs'), { cache: 'no-store' });
+      const data = await res.json();
+      if (data.success) setChatLogs(data.logs);
+    } catch (error) { console.error(error); }
+  }, [buildNoCacheUrl]);
+
+  const fetchAllData = useCallback(async () => {
+    setLoading(true);
+    await Promise.all([
+      fetchStats(),
+      fetchModels(),
+      fetchUsers(),
+      fetchChatLogs()
+    ]);
+    setLoading(false);
+  }, [fetchStats, fetchModels, fetchUsers, fetchChatLogs]);
 
   useEffect(() => {
     if (!isLocked) {
       fetchAllData();
     }
-  }, [isLocked]);
+  }, [isLocked, fetchAllData]);
+
+  useEffect(() => {
+    if (isLocked) return undefined;
+    const intervalId = window.setInterval(() => {
+      fetchAllData();
+    }, 15000);
+    return () => window.clearInterval(intervalId);
+  }, [isLocked, fetchAllData]);
 
   const handleUnlock = async (e) => {
     e.preventDefault();
@@ -57,47 +116,59 @@ function AdminDashboard() {
     }
   };
 
-  const fetchAllData = async () => {
-    setLoading(true);
-    await Promise.all([
-      fetchStats(),
-      fetchModels(),
-      fetchUsers(),
-      fetchChatLogs()
-    ]);
-    setLoading(false);
+  const verifyIntegrations = async () => {
+    setVerifyingIntegrations(true);
+    try {
+      const res = await fetch(buildNoCacheUrl('/api/admin/integrations/verify'), { cache: 'no-store' });
+      const data = await res.json();
+      setIntegrationReport(data.report || null);
+      if (!data.success) {
+        alert('Some integrations failed verification. Check the report section in MLOps tab.');
+      }
+    } catch (error) {
+      console.error(error);
+      alert('Failed to verify integrations.');
+    } finally {
+      setVerifyingIntegrations(false);
+    }
   };
 
-  const fetchStats = async () => {
-    try {
-      const res = await fetch(`${API_BASE_URL}/api/admin/stats`);
-      const data = await res.json();
-      if (data.success) setStats(data.metrics);
-    } catch (error) { console.error(error); }
-  };
+  const resetMLOpsState = async () => {
+    const confirmation = window.prompt('Type RESET_MY_MLOPS_STATE to confirm full fresh-start reset:');
+    if (confirmation !== 'RESET_MY_MLOPS_STATE') return;
 
-  const fetchModels = async () => {
-    try {
-      const res = await fetch(`${API_BASE_URL}/api/admin/models`);
-      const data = await res.json();
-      if (data.success) setModels(data.models);
-    } catch (error) { console.error(error); }
-  };
+    const seedInput = window.prompt('Optional seed tickers (comma-separated). Leave blank for empty universe:', '');
+    const seedStocks = (seedInput || '')
+      .split(',')
+      .map((s) => s.trim().toUpperCase())
+      .filter(Boolean);
 
-  const fetchUsers = async () => {
+    setResettingMLOps(true);
     try {
-      const res = await fetch(`${API_BASE_URL}/api/admin/users`);
+      const res = await fetch(`${API_BASE_URL}/api/admin/reset_mlops_state`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          confirm: confirmation,
+          clear_prediction_logs: true,
+          clear_active_tickers: true,
+          wipe_mlflow_experiment: true,
+          seed_stocks: seedStocks
+        })
+      });
       const data = await res.json();
-      if (data.success) setUsers(data.users);
-    } catch (error) { console.error(error); }
-  };
-
-  const fetchChatLogs = async () => {
-    try {
-      const res = await fetch(`${API_BASE_URL}/api/admin/chat_logs`);
-      const data = await res.json();
-      if (data.success) setChatLogs(data.logs);
-    } catch (error) { console.error(error); }
+      if (!data.success) {
+        alert(`Reset failed: ${data.error || 'Unknown error'}`);
+      } else {
+        alert('MLOps state reset complete. Fresh system baseline is ready.');
+        fetchAllData();
+      }
+    } catch (error) {
+      console.error(error);
+      alert('Failed to reset MLOps state.');
+    } finally {
+      setResettingMLOps(false);
+    }
   };
 
   const forceRetrain = async (ticker) => {
@@ -266,6 +337,14 @@ function AdminDashboard() {
         <p className="text-gray-600 dark:text-gray-400 text-lg max-w-2xl mx-auto flex items-center justify-center gap-2 font-medium">
           <i className="fas fa-shield-check text-green-500"></i> Authenticated as System Administrator
         </p>
+        <div className="mt-5">
+          <button
+            onClick={fetchAllData}
+            className="px-4 py-2 rounded-lg bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-500/30 text-sm font-bold"
+          >
+            <i className="fas fa-sync-alt mr-2"></i>Refresh Now
+          </button>
+        </div>
       </div>
 
       {/* Tabs */}
@@ -425,22 +504,27 @@ function AdminDashboard() {
                   <table className="w-full text-left border-collapse">
                     <thead>
                       <tr className="bg-white dark:bg-dark-card text-gray-500 dark:text-gray-400 text-xs uppercase tracking-widest border-b border-gray-200 dark:border-dark-border">
-                        <th className="p-5 font-bold">User Email</th>
+                        <th className="p-5 font-bold">User</th>
                         <th className="p-5 font-bold">Subscription</th>
                         <th className="p-5 font-bold">Activity Metrics</th>
+                        <th className="p-5 font-bold">User Stocks</th>
+                        <th className="p-5 font-bold">Top Search</th>
                         <th className="p-5 font-bold text-right">Action</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100 dark:divide-dark-border">
                       {users.length === 0 ? (
-                        <tr><td colSpan="4" className="p-8 text-center text-gray-500 font-medium">No users found in database.</td></tr>
+                        <tr><td colSpan="6" className="p-8 text-center text-gray-500 font-medium">No users found in database.</td></tr>
                       ) : users.map((user, idx) => (
                         <tr key={idx} className="hover:bg-gray-50 dark:hover:bg-dark-elevated transition-colors">
                           <td className="p-5 font-bold text-gray-900 dark:text-white flex items-center gap-3">
                             <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-400 to-indigo-500 flex items-center justify-center text-white text-xs shadow-sm">
-                              {(user.email || 'A').charAt(0).toUpperCase()}
+                              {(user.name || user.email || 'A').charAt(0).toUpperCase()}
                             </div>
-                            {user.email || 'Anonymous/Guest'}
+                            <div>
+                              <div>{user.name || user.email || 'Anonymous/Guest'}</div>
+                              <div className="text-xs font-medium text-gray-500 dark:text-gray-400">{user.email || 'No email'}</div>
+                            </div>
                           </td>
                           <td className="p-5">
                             <span className={`px-3 py-1 rounded-md text-xs font-black uppercase tracking-wider ${user.tier === 'pro' ? 'bg-gradient-to-r from-amber-400 to-orange-500 text-white shadow-sm' : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300'}`}>
@@ -450,6 +534,14 @@ function AdminDashboard() {
                           <td className="p-5 text-gray-600 dark:text-gray-400 text-sm font-medium">
                             <span className="bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded mr-2"><i className="fas fa-eye text-blue-400 mr-1"></i> {user.watchlists}</span>
                             <span className="bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded"><i className="fas fa-comment text-emerald-400 mr-1"></i> {user.chats}</span>
+                          </td>
+                          <td className="p-5 text-sm text-gray-600 dark:text-gray-300 font-medium">
+                            {Array.isArray(user.watchlist_tickers) && user.watchlist_tickers.length > 0
+                              ? user.watchlist_tickers.slice(0, 5).join(', ')
+                              : 'No stocks'}
+                          </td>
+                          <td className="p-5 text-sm text-gray-700 dark:text-gray-300 font-semibold">
+                            {user.top_searched_stock ? `${user.top_searched_stock} (${user.top_searched_count})` : 'N/A'}
                           </td>
                           <td className="p-5 text-right whitespace-nowrap">
                             <button 
@@ -514,6 +606,44 @@ function AdminDashboard() {
                     
                     <button onClick={trainAllStocks} className="w-full py-4 bg-white text-blue-700 hover:bg-blue-50 rounded-xl font-black shadow-lg transition-transform hover:-translate-y-1 flex justify-center items-center gap-2">
                       <i className="fas fa-forward"></i> Train ALL Stocks Now
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  <div className="bg-white dark:bg-dark-card rounded-2xl p-6 border border-gray-200 dark:border-dark-border shadow-lg">
+                    <h3 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2 mb-3">
+                      <i className="fas fa-heartbeat text-green-500"></i> Integration Verification
+                    </h3>
+                    <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">Checks MLflow/DagsHub connectivity, Grafana health, and Prometheus readiness.</p>
+                    <button
+                      onClick={verifyIntegrations}
+                      disabled={verifyingIntegrations}
+                      className="px-5 py-3 bg-green-50 dark:bg-green-500/10 text-green-700 dark:text-green-300 border border-green-200 dark:border-green-500/30 rounded-lg font-bold"
+                    >
+                      {verifyingIntegrations ? 'Verifying...' : 'Verify Integrations'}
+                    </button>
+                    {integrationReport && (
+                      <div className="mt-4 text-sm text-gray-700 dark:text-gray-300 space-y-1">
+                        <div>MLflow: <b>{integrationReport.mlflow?.ok ? 'OK' : 'FAIL'}</b></div>
+                        <div>Grafana: <b>{integrationReport.grafana?.ok ? 'OK' : 'FAIL'}</b></div>
+                        <div>Prometheus: <b>{integrationReport.prometheus?.ok ? 'OK' : 'FAIL'}</b></div>
+                        <div>DagsHub Configured: <b>{integrationReport.dagshub?.configured ? 'YES' : 'NO'}</b></div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="bg-white dark:bg-dark-card rounded-2xl p-6 border border-red-200 dark:border-red-500/30 shadow-lg">
+                    <h3 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2 mb-3">
+                      <i className="fas fa-triangle-exclamation text-red-500"></i> Fresh Start Reset
+                    </h3>
+                    <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">Clears model registry, ML runs, active tickers, and prediction logs, then starts from clean seed stocks.</p>
+                    <button
+                      onClick={resetMLOpsState}
+                      disabled={resettingMLOps}
+                      className="px-5 py-3 bg-red-50 dark:bg-red-500/10 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-500/30 rounded-lg font-bold"
+                    >
+                      {resettingMLOps ? 'Resetting...' : 'Reset MLOps State'}
                     </button>
                   </div>
                 </div>

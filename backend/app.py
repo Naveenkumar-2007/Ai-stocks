@@ -1300,6 +1300,7 @@ def get_stock_data(ticker):
             'volume': volume,
             'predicted_volume': predicted_volumes,
             'is_training': len(predictions) == 0,
+            'prediction_ready': len(predictions) > 0,
             'market_cap': market_cap,
             'pe_ratio': safe_float(pe_ratio) if isinstance(pe_ratio, (int, float)) and not pd.isna(pe_ratio) else None,
             'days_predicted': days,
@@ -1337,21 +1338,6 @@ def get_stock_data(ticker):
             response['quote_symbol_used'] = quote_symbol_used
         if app.debug and metrics_symbol_used:
             response['metrics_symbol_used'] = metrics_symbol_used
-
-        # Enterprise Analytics: Log this prediction search
-        try:
-            from models import PredictionLog, User
-            user_id = None
-            if hasattr(g, 'firebase_user') and g.firebase_user:
-                email = g.firebase_user.get('email')
-                user = db_session.query(User).filter_by(email=email).first()
-                if user:
-                    user_id = user.id
-            log_entry = PredictionLog(user_id=user_id, ticker=resolved_ticker)
-            db_session.add(log_entry)
-            db_session.commit()
-        except Exception as log_err:
-            print(f"Failed to log prediction to db: {log_err}")
 
         return jsonify(response)
 
@@ -1594,24 +1580,13 @@ def predict_multi_day_lstm(hist, current_price, days, ticker):
             return predictions
         
         else:
-            # --- Safe fallback to technical analysis if scaler is missing ---
-            # Never use on-the-fly scaling for a pre-trained model as it produces garbage
-            print(f"⚠️ No scaler found for {ticker} LSTM. Falling back to technical analysis for accuracy.")
-            for day in range(days):
-                pred = predict_with_technical_analysis(hist, current_price)
-                predictions.append(pred)
-                current_price = pred
-            return predictions
+            # Strict production behavior: scaler mismatch means model output is unsafe.
+            print(f"⚠️ No scaler found for {ticker}. Returning training-in-progress state.")
+            return []
         
     except Exception as e:
         print(f"LSTM prediction error: {e}")
-        
-        # FALLBACK 2: Technical analysis
-        for day in range(days):
-            pred = predict_with_technical_analysis(hist, current_price)
-            predictions.append(pred)
-            current_price = pred
-        return predictions
+        return []
 
 def predict_with_technical_analysis(hist, current_price):
     """Fallback prediction using technical indicators"""
