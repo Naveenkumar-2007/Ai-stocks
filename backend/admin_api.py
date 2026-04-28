@@ -415,6 +415,10 @@ def get_chat_logs():
 @admin_bp.route('/integrations/verify', methods=['GET'])
 def verify_integrations():
     """Verify external integrations needed for production observability and model ops."""
+    grafana_user = os.getenv('GRAFANA_USER', '').strip()
+    grafana_token = os.getenv('GRAFANA_TOKEN', '').strip()
+    grafana_auth = (grafana_user, grafana_token) if grafana_user and grafana_token else None
+
     report = {
         "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
         "dagshub": {
@@ -429,6 +433,7 @@ def verify_integrations():
         },
         "grafana": {
             "url": os.getenv('GRAFANA_URL', 'http://localhost:3000'),
+            "auth_configured": bool(grafana_auth),
             "ok": False,
             "error": None
         },
@@ -453,7 +458,7 @@ def verify_integrations():
     try:
         import requests
         grafana_url = report['grafana']['url'].rstrip('/') + '/api/health'
-        resp = requests.get(grafana_url, timeout=5)
+        resp = requests.get(grafana_url, timeout=5, auth=grafana_auth)
         report['grafana']['ok'] = resp.ok
         if not resp.ok:
             report['grafana']['error'] = f"HTTP {resp.status_code}"
