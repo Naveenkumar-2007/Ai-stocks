@@ -35,6 +35,39 @@ def _safe_remove(path: Path):
         except OSError:
             pass
 
+
+def _parse_admin_emails():
+    raw = os.getenv('ADMIN_EMAILS', '')
+    return {item.strip().lower() for item in raw.split(',') if item.strip()}
+
+
+def _load_chat_logs_from_storage(limit: int):
+    chat_dir = Path(__file__).resolve().parent / 'chatbot' / 'app' / 'chat_storage'
+    if not chat_dir.exists():
+        return []
+
+    entries = []
+    for file_path in chat_dir.glob('*.json'):
+        try:
+            data = json.loads(file_path.read_text(encoding='utf-8'))
+        except Exception:
+            continue
+
+        timestamp = data.get('updated_at') or data.get('created_at')
+        messages = data.get('messages', [])
+        for msg in messages:
+            role = (msg.get('role') or '').lower()
+            sender = 'user' if role == 'user' else 'ai'
+            entries.append({
+                'session_id': data.get('chat_id'),
+                'sender': sender,
+                'content': msg.get('content', ''),
+                'timestamp': timestamp
+            })
+
+    entries.sort(key=lambda item: item.get('timestamp') or '', reverse=True)
+    return entries[:limit]
+
 # Generate an unguessable fallback password to prevent unauthorized access if the env variable is missing
 DEFAULT_SECURE_PASSWORD = secrets.token_hex(32)
 
@@ -167,6 +200,60 @@ def get_users():
             "last_active_at": latest_search.isoformat() if latest_search else None
         })
     return _json_nocache({"success": True, "users": result})
+
+
+@admin_bp.route('/firebase/import-users', methods=['POST'])
+def import_firebase_users():
+    """Sync Firebase Auth users into the SQL users table."""
+    try:
+        import firebase_admin
+        if not firebase_admin._apps:  # type: ignore[attr-defined]
+            return _json_nocache({"success": False, "error": "Firebase Admin SDK not configured."}, 503)
+        from firebase_admin import auth as firebase_auth
+    except Exception:
+        return _json_nocache({"success": False, "error": "Firebase Admin SDK not available."}, 503)
+
+    admin_emails = _parse_admin_emails()
+    created = 0
+    updated = 0
+    scanned = 0
+
+    try:
+        for fb_user in firebase_auth.list_users().iterate_all():
+            scanned += 1
+            uid = fb_user.uid
+            email = (fb_user.email or '').strip().lower() or None
+            if not uid:
+                continue
+
+            user = db_session.query(User).filter_by(firebase_uid=uid).first()
+            role = "admin" if email and email in admin_emails else "user"
+            if user:
+                changed = False
+                if email and user.email != email:
+                    user.email = email
+                    changed = True
+                if role and user.role != role:
+                    user.role = role
+                    changed = True
+                if changed:
+                    updated += 1
+            else:
+                user = User(firebase_uid=uid, email=email, role=role)
+                db_session.add(user)
+                created += 1
+
+        db_session.commit()
+    except Exception as exc:
+        db_session.rollback()
+        return _json_nocache({"success": False, "error": str(exc)}, 500)
+
+    return _json_nocache({
+        "success": True,
+        "scanned": scanned,
+        "created": created,
+        "updated": updated
+    })
 
 @admin_bp.route('/users/<int:user_id>/tier', methods=['POST'])
 def update_user_tier(user_id):
@@ -317,6 +404,11 @@ def get_chat_logs():
             "content": m.content,
             "timestamp": m.timestamp.isoformat()
         })
+
+    if not result:
+        fallback = _load_chat_logs_from_storage(limit)
+        return _json_nocache({"success": True, "logs": fallback})
+
     return _json_nocache({"success": True, "logs": result})
 
 

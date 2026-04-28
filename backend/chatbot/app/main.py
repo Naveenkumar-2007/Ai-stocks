@@ -8,6 +8,8 @@ import sys
 import json
 import uuid
 import uvicorn
+import importlib.util
+from pathlib import Path
 from datetime import datetime
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -24,6 +26,72 @@ logger = logging.getLogger(__name__)
 
 CHATS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "chat_storage")
 os.makedirs(CHATS_DIR, exist_ok=True)
+
+_db_session = None
+_backend_models = None
+
+
+def _load_backend_db():
+    """Load backend database/session and models without clashing with chatbot models."""
+    global _db_session, _backend_models
+    if _db_session is not None and _backend_models is not None:
+        return True
+
+    backend_dir = Path(__file__).resolve().parents[2]
+    database_path = backend_dir / "database.py"
+    models_path = backend_dir / "models.py"
+
+    if not database_path.exists() or not models_path.exists():
+        return False
+
+    try:
+        db_spec = importlib.util.spec_from_file_location("backend_database", str(database_path))
+        if not db_spec or not db_spec.loader:
+            return False
+        db_module = importlib.util.module_from_spec(db_spec)
+        db_spec.loader.exec_module(db_module)
+
+        models_spec = importlib.util.spec_from_file_location("backend_models", str(models_path))
+        if not models_spec or not models_spec.loader:
+            return False
+        models_module = importlib.util.module_from_spec(models_spec)
+        models_spec.loader.exec_module(models_module)
+
+        _db_session = getattr(db_module, "db_session", None)
+        _backend_models = models_module
+        return _db_session is not None and _backend_models is not None
+    except Exception as exc:
+        logger.warning("Failed to load backend DB modules: %s", exc)
+        _db_session = None
+        _backend_models = None
+        return False
+
+
+def _persist_chat_to_db(chat_id: str, user_message: str, ai_message: str) -> None:
+    if not _load_backend_db() or not _db_session or not _backend_models:
+        return
+
+    ChatSession = getattr(_backend_models, "ChatSession", None)
+    ChatMessage = getattr(_backend_models, "ChatMessage", None)
+    if not ChatSession or not ChatMessage:
+        return
+
+    try:
+        session_row = _db_session.query(ChatSession).filter_by(session_id=chat_id).first()
+        if not session_row:
+            session_row = ChatSession(session_id=chat_id)
+            _db_session.add(session_row)
+            _db_session.commit()
+
+        _db_session.add(ChatMessage(session_id=session_row.id, sender="user", content=user_message))
+        _db_session.add(ChatMessage(session_id=session_row.id, sender="ai", content=ai_message))
+        _db_session.commit()
+    except Exception as exc:
+        logger.warning("Failed to persist chat to DB: %s", exc)
+        try:
+            _db_session.rollback()
+        except Exception:
+            pass
 
 app = FastAPI(
     title=settings.app_name,
@@ -118,6 +186,7 @@ async def chat(request: ChatRequest):
         session.messages.append(ChatMessage(role="assistant", content=result.reply))
         session.updated_at = datetime.now().isoformat()
         _save_chat(session)
+        _persist_chat_to_db(chat_id, request.message, result.reply)
 
         logger.info(f"🤖 Bot: {result.reply[:80]}...")
 
@@ -164,6 +233,22 @@ async def delete_chat(chat_id: str):
     path = os.path.join(CHATS_DIR, f"{chat_id}.json")
     if os.path.exists(path):
         os.remove(path)
+        if _load_backend_db() and _db_session and _backend_models:
+            try:
+                ChatSession = getattr(_backend_models, "ChatSession", None)
+                ChatMessage = getattr(_backend_models, "ChatMessage", None)
+                if ChatSession and ChatMessage:
+                    session_row = _db_session.query(ChatSession).filter_by(session_id=chat_id).first()
+                    if session_row:
+                        _db_session.query(ChatMessage).filter_by(session_id=session_row.id).delete()
+                        _db_session.delete(session_row)
+                        _db_session.commit()
+            except Exception as exc:
+                logger.warning("Failed to delete chat from DB: %s", exc)
+                try:
+                    _db_session.rollback()
+                except Exception:
+                    pass
         return {"message": "Chat deleted", "chat_id": chat_id}
     raise HTTPException(status_code=404, detail="Chat not found")
 

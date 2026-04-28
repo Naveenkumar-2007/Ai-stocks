@@ -28,6 +28,7 @@ function AdminDashboard() {
   const [integrationReport, setIntegrationReport] = useState(null);
   const [resettingMLOps, setResettingMLOps] = useState(false);
   const [scheduleTime, setScheduleTime] = useState('04:00'); // Default 4 AM IST
+  const [syncingUsers, setSyncingUsers] = useState(false);
 
   const buildNoCacheUrl = useCallback((path) => {
     const sep = path.includes('?') ? '&' : '?';
@@ -223,6 +224,24 @@ function AdminDashboard() {
       await fetch(`${API_BASE_URL}/api/admin/users/${userId}`, { method: 'DELETE' });
       fetchUsers();
     } catch (error) { alert("Failed to delete user."); }
+  };
+
+  const syncFirebaseUsers = async () => {
+    setSyncingUsers(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/admin/firebase/import-users`, { method: 'POST' });
+      const data = await res.json();
+      if (!data.success) {
+        alert(`Sync failed: ${data.error || 'Unknown error'}`);
+      } else {
+        alert(`Synced Firebase users. Scanned: ${data.scanned}, Created: ${data.created}, Updated: ${data.updated}`);
+        fetchUsers();
+      }
+    } catch (error) {
+      alert('Failed to sync Firebase users.');
+    } finally {
+      setSyncingUsers(false);
+    }
   };
 
   const clearCache = async () => {
@@ -496,9 +515,18 @@ function AdminDashboard() {
                     </h3>
                     <p className="text-sm text-gray-500 mt-1">Manage platform access and subscription tiers.</p>
                   </div>
-                  <span className="bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-400 px-4 py-2 rounded-lg text-sm font-black shadow-sm">
-                    {users.length} Total Users
-                  </span>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <button
+                      onClick={syncFirebaseUsers}
+                      disabled={syncingUsers}
+                      className="px-4 py-2 rounded-lg bg-indigo-50 dark:bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-500/30 text-sm font-bold"
+                    >
+                      {syncingUsers ? 'Syncing...' : 'Sync Firebase Users'}
+                    </button>
+                    <span className="bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-400 px-4 py-2 rounded-lg text-sm font-black shadow-sm">
+                      {users.length} Total Users
+                    </span>
+                  </div>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-left border-collapse">
