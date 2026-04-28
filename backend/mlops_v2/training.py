@@ -13,7 +13,7 @@ from sklearn.metrics import accuracy_score, mean_squared_error
 from sklearn.model_selection import TimeSeriesSplit
 
 from mlops_v2.data_ingestion import DataIngestionService
-from mlops_v2.drift import compute_drift
+from mlops_v2.drift import compute_drift, DriftResult
 from mlops_v2.feature_engineering import FEATURE_COLUMNS, FeatureEngineer
 from mlops_v2.monitoring import set_drift_score
 from mlops_v2.registry import get_model_paths, log_mlflow_run
@@ -87,7 +87,12 @@ class TrainerV2:
         ref = features.iloc[:-SETTINGS.min_rows]
         cur = features.iloc[-SETTINGS.min_rows:]
         if ref.empty:
-            drift_score = 1.0
+            report_dir = SETTINGS.reports_dir / pd.Timestamp.utcnow().strftime("%Y-%m-%d")
+            report_dir.mkdir(parents=True, exist_ok=True)
+            report_path = report_dir / f"{ticker}_drift.html"
+            report_path.write_text("<html><body><h3>Drift report unavailable: insufficient reference data.</h3></body></html>", encoding="utf-8")
+            drift_result = DriftResult(drift_score=1.0, drifted_features=0, report_path=report_path)
+            drift_score = drift_result.drift_score
         else:
             drift_result = compute_drift(ref, cur, report_name=f"{ticker}_drift")
             drift_score = drift_result.drift_score

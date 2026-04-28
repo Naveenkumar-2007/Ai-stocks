@@ -22,6 +22,27 @@ class ValidationResult:
 class DataValidator:
     """Great Expectations validation for stock data before training."""
 
+    def _build_html_report(self, payload: dict) -> str:
+        rows = []
+        for check in payload.get("checks", []):
+            status = "PASS" if check.get("success") else "FAIL"
+            rows.append(f"<tr><td>{check.get('check')}</td><td>{status}</td></tr>")
+
+        errors = payload.get("errors", [])
+        errors_block = "".join(f"<li>{err}</li>" for err in errors) if errors else "<li>None</li>"
+
+        return (
+            "<html><head><title>Validation Report</title></head><body>"
+            f"<h2>Validation Report - {payload.get('ticker')}</h2>"
+            f"<p><b>OK:</b> {payload.get('ok')}</p>"
+            f"<p><b>Checks Passed:</b> {payload.get('checks_passed')} / {payload.get('checks_total')}</p>"
+            "<h3>Errors</h3><ul>" + errors_block + "</ul>"
+            "<h3>Checks</h3><table border='1' cellpadding='6' cellspacing='0'>"
+            "<tr><th>Check</th><th>Status</th></tr>" + "".join(rows) + "</table>"
+            f"<p><i>Generated at {payload.get('generated_at')}</i></p>"
+            "</body></html>"
+        )
+
     def validate(self, df: pd.DataFrame, ticker: str | None = None) -> ValidationResult:
         errors: List[str] = []
         checks: List[dict] = []
@@ -29,7 +50,8 @@ class DataValidator:
         report_dir = SETTINGS.reports_dir / pd.Timestamp.utcnow().strftime("%Y-%m-%d") / "validation"
         report_dir.mkdir(parents=True, exist_ok=True)
         safe_ticker = (ticker or "unknown").strip().upper().replace("/", "_")
-        report_path = report_dir / f"{safe_ticker}_validation.json"
+        report_json_path = report_dir / f"{safe_ticker}_validation.json"
+        report_html_path = report_dir / f"{safe_ticker}_validation.html"
 
         def _finalize() -> ValidationResult:
             checks_total = len(checks)
@@ -43,11 +65,12 @@ class DataValidator:
                 "checks": checks,
                 "generated_at": pd.Timestamp.utcnow().isoformat(),
             }
-            report_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+            report_json_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+            report_html_path.write_text(self._build_html_report(payload), encoding="utf-8")
             return ValidationResult(
                 ok=len(errors) == 0,
                 errors=errors,
-                report_path=str(report_path),
+                report_path=str(report_html_path),
                 checks_total=checks_total,
                 checks_passed=checks_passed,
             )

@@ -60,7 +60,9 @@ for i in $(seq 1 10); do
 done
 
 # Start Prometheus Agent if Grafana Cloud secrets are present
-if [ -n "${GRAFANA_URL:-}" ] && [ -n "${GRAFANA_USER:-}" ] && [ -n "${GRAFANA_TOKEN:-}" ]; then
+REMOTE_WRITE_URL="${GRAFANA_REMOTE_WRITE_URL:-${PROM_REMOTE_WRITE_URL:-${GRAFANA_URL:-}}}"
+
+if [ -n "${REMOTE_WRITE_URL:-}" ] && [ -n "${GRAFANA_USER:-}" ] && [ -n "${GRAFANA_TOKEN:-}" ]; then
   echo "📊 Setting up Prometheus remote write to Grafana Cloud..."
   
   cat <<EOF > /app/prometheus.yml
@@ -73,7 +75,7 @@ scrape_configs:
       - targets: ['127.0.0.1:7860']
 
 remote_write:
-  - url: "${GRAFANA_URL}"
+  - url: "${REMOTE_WRITE_URL}"
     basic_auth:
       username: "${GRAFANA_USER}"
       password: "${GRAFANA_TOKEN}"
@@ -84,7 +86,7 @@ EOF
   prometheus --config.file=/app/prometheus.yml --storage.agent.path=/app/data-agent --enable-feature=agent &
   PROMETHEUS_PID=$!
 else
-  echo "⚠️ GRAFANA_URL, GRAFANA_USER, or GRAFANA_TOKEN not set. Skipping Prometheus agent."
+  echo "⚠️ Remote write URL, GRAFANA_USER, or GRAFANA_TOKEN not set. Skipping Prometheus agent."
 fi
 
 # Start Gunicorn (main Flask app)

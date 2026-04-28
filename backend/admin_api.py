@@ -418,6 +418,7 @@ def verify_integrations():
     grafana_user = os.getenv('GRAFANA_USER', '').strip()
     grafana_token = os.getenv('GRAFANA_TOKEN', '').strip()
     grafana_auth = (grafana_user, grafana_token) if grafana_user and grafana_token else None
+    remote_write_url = os.getenv('GRAFANA_REMOTE_WRITE_URL', '').strip() or os.getenv('PROM_REMOTE_WRITE_URL', '').strip()
 
     report = {
         "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
@@ -434,6 +435,7 @@ def verify_integrations():
         "grafana": {
             "url": os.getenv('GRAFANA_URL', 'http://localhost:3000'),
             "auth_configured": bool(grafana_auth),
+            "remote_write_configured": bool(remote_write_url),
             "ok": False,
             "error": None
         },

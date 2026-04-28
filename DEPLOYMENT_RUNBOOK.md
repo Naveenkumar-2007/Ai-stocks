@@ -62,7 +62,9 @@ Training scheduler:
 - ENABLE_STARTUP_CATCHUP
 
 Monitoring (optional explicit URLs used by integration checks):
-- GRAFANA_URL (default http://localhost:3000)
+- GRAFANA_URL (Grafana UI URL; default http://localhost:3000)
+- GRAFANA_REMOTE_WRITE_URL (Grafana Cloud Prometheus remote_write endpoint)
+- PROM_REMOTE_WRITE_URL (alias for GRAFANA_REMOTE_WRITE_URL)
 - PROMETHEUS_URL (default http://localhost:9090)
 
 ## 3. Build and Start
