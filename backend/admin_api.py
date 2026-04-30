@@ -485,7 +485,8 @@ def verify_integrations():
 def reset_mlops_state():
     """
     Fresh-start reset for production ML state.
-    This clears local model registry/runs and optionally the MLflow experiment.
+    This clears local model registry/runs and optionally the MLflow experiment
+    and registered model entries.
     """
     data = request.get_json(silent=True) or {}
     confirm = str(data.get('confirm', '')).strip()
@@ -499,6 +500,7 @@ def reset_mlops_state():
     clear_active_tickers = bool(data.get('clear_active_tickers', True))
     wipe_mlflow_experiment = bool(data.get('wipe_mlflow_experiment', False))
     wipe_all_mlflow_experiments = bool(data.get('wipe_all_mlflow_experiments', False))
+    wipe_mlflow_registered_models = bool(data.get('wipe_mlflow_registered_models', False))
     seed_stocks = data.get('seed_stocks', [])
     if not isinstance(seed_stocks, list):
         seed_stocks = []
@@ -551,15 +553,24 @@ def reset_mlops_state():
         "attempted": False,
         "deleted_experiment": None,
         "deleted_experiments": [],
+        "deleted_registered_models": [],
         "error": None
     }
-    if wipe_mlflow_experiment or wipe_all_mlflow_experiments:
+    if wipe_mlflow_experiment or wipe_all_mlflow_experiments or wipe_mlflow_registered_models:
         mlflow_reset['attempted'] = True
         try:
             import mlflow
             from mlops.config import MLOpsConfig
             mlflow.set_tracking_uri(MLOpsConfig.MLFLOW_TRACKING_URI)
             client = mlflow.tracking.MlflowClient()
+
+            if wipe_mlflow_registered_models:
+                for model in client.search_registered_models():
+                    model_name = getattr(model, 'name', '')
+                    if not model_name.startswith('LSTM_'):
+                        continue
+                    client.delete_registered_model(model_name)
+                    mlflow_reset['deleted_registered_models'].append(model_name)
 
             if wipe_all_mlflow_experiments:
                 for exp in client.search_experiments():
