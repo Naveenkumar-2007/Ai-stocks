@@ -31,6 +31,7 @@ backend/airflow/airflow.db
 backend/airflow/__pycache__/
 backend/mlops_v2/models/
 backend/mlops_v2/__pycache__/
+backend/mlops/ultimate_engine/**/model.joblib
 mlops/checkpoints/
 mlops/logs/
 cache/

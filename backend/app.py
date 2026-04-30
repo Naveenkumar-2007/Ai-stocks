@@ -73,6 +73,7 @@ SCALER_PATH = 'artifacts/scaler.pkl'
 # Per-ticker model cache: { 'AAPL': model, 'TSLA': model, ... }
 _model_cache = {}
 _scaler_cache = {}
+_ultimate_prediction_cache = {}
 # Per-ticker model metadata cache: { 'AAPL': {'version': '1', 'run_id': 'xyz', 'source': 'mlflow'} }
 _model_metadata = {}
 _training_in_progress = set()
@@ -785,7 +786,7 @@ def get_stock_data(ticker):
         for candidate in candidates:
             candidate_hist, info = get_stock_history(
                 candidate['symbol'],
-                days=180,
+                days=900,
                 exchange=candidate.get('exchange'),
                 country=candidate.get('country'),
                 return_info=True
@@ -1216,6 +1217,19 @@ def get_stock_data(ticker):
                 }
         except Exception as e:
             print(f"Registry lookup failed: {e}")
+
+        ultimate_payload = _ultimate_prediction_cache.get(resolved_ticker.upper())
+        if ultimate_payload:
+            ultimate_metrics = ultimate_payload.get('metrics', {})
+            model_info_data = {
+                'version': ultimate_payload.get('model_version', 'v36-production'),
+                'model_type': 'Ultimate Regime Ensemble',
+                'directional_accuracy': safe_float(ultimate_metrics.get('accuracy'), 1),
+                'f1': safe_float(ultimate_metrics.get('f1'), 1),
+                'auc': safe_float(ultimate_metrics.get('auc'), 4),
+                'last_trained': ultimate_payload.get('trained_at', 'unknown')
+            }
+            ai_signal = ultimate_payload.get('signal', ai_signal)
         
         # --- Volume trend label ---
         volume_trend = 'normal'
@@ -1246,57 +1260,58 @@ def get_stock_data(ticker):
         indicators['atr'] = safe_float(latest_row.get('ATR')) if 'ATR' in hist.columns else None
         
         # v2 inference contract (5-day forward return + confidence interval)
-        v2_payload = None
-        try:
-            from mlops_v2.inference import InferenceServiceV2
-            v2_payload = InferenceServiceV2().predict(resolved_ticker)
-            
-            # Update Grafana Accuracy and PnL gauges
+        v2_payload = ultimate_payload
+        if v2_payload is None:
             try:
-                from mlops_v2.monitoring import set_accuracy_20d, set_simulated_pnl, set_sharpe_ratio
-                import json
-                from mlops_v2.registry import get_model_paths
-                metadata_path = get_model_paths(resolved_ticker).metadata
-                if metadata_path.exists():
-                    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-                    metrics = metadata.get("metrics", {})
-                    
-                    accuracy = float(metrics.get("xgb_accuracy", 0.0))
-                    set_accuracy_20d(resolved_ticker, accuracy)
-                    
-                    pnl = float(metrics.get("simulated_pnl", 0.0))
-                    set_simulated_pnl(resolved_ticker, pnl)
-                    
-                    sharpe = float(metrics.get("sharpe_ratio", 0.0))
-                    set_sharpe_ratio(resolved_ticker, sharpe)
-                    
-            except Exception as monitoring_err:
-                print(f"Failed to update monitoring gauges: {monitoring_err}")
+                from mlops_v2.inference import InferenceServiceV2
+                v2_payload = InferenceServiceV2().predict(resolved_ticker)
                 
-        except Exception as _v2_exc:
+                # Update Grafana Accuracy and PnL gauges
+                try:
+                    from mlops_v2.monitoring import set_accuracy_20d, set_simulated_pnl, set_sharpe_ratio
+                    import json
+                    from mlops_v2.registry import get_model_paths
+                    metadata_path = get_model_paths(resolved_ticker).metadata
+                    if metadata_path.exists():
+                        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+                        metrics = metadata.get("metrics", {})
+                        
+                        accuracy = float(metrics.get("xgb_accuracy", 0.0))
+                        set_accuracy_20d(resolved_ticker, accuracy)
+                        
+                        pnl = float(metrics.get("simulated_pnl", 0.0))
+                        set_simulated_pnl(resolved_ticker, pnl)
+                        
+                        sharpe = float(metrics.get("sharpe_ratio", 0.0))
+                        set_sharpe_ratio(resolved_ticker, sharpe)
+                        
+                except Exception as monitoring_err:
+                    print(f"Failed to update monitoring gauges: {monitoring_err}")
+                    
+            except Exception as _v2_exc:
             # Fallback to local computation if v2 models are unavailable.
-            five_day_pred = predictions[min(4, len(predictions) - 1)] if predictions else current_price
-            pred_return = ((five_day_pred - current_price) / current_price) if current_price else 0.0
-            direction_prob = 0.5 + max(-0.2, min(0.2, pred_return * 5.0))
-            uncertainty = abs(pred_return) * 0.5 + 0.01
-            try:
-                from mlops_v2.feature_engineering import FEATURE_COLUMNS
-                features_used = FEATURE_COLUMNS
-            except Exception:
-                features_used = []
+                five_day_pred = predictions[min(4, len(predictions) - 1)] if predictions else current_price
+                pred_return = ((five_day_pred - current_price) / current_price) if current_price else 0.0
+                direction_prob = 0.5 + max(-0.2, min(0.2, pred_return * 5.0))
+                uncertainty = abs(pred_return) * 0.5 + 0.01
+                try:
+                    from mlops_v2.feature_engineering import FEATURE_COLUMNS
+                    features_used = FEATURE_COLUMNS
+                except Exception:
+                    features_used = []
 
-            v2_payload = {
-                'ticker': resolved_ticker,
-                'prediction': float(pred_return),
-                'lower_95': float(pred_return - 1.96 * uncertainty),
-                'upper_95': float(pred_return + 1.96 * uncertainty),
-                'confidence': float(max(0.0, min(1.0, 1.0 - uncertainty))),
-                'direction_prob': float(max(0.0, min(1.0, direction_prob))),
-                'model_version': (model_info_data.get('version') or 'fallback') if isinstance(model_info_data, dict) else 'fallback',
-                'features_used': features_used,
-                'data_freshness': datetime.utcnow().isoformat() + 'Z',
-                'drift_score': 0.0,
-            }
+                v2_payload = {
+                    'ticker': resolved_ticker,
+                    'prediction': float(pred_return),
+                    'lower_95': float(pred_return - 1.96 * uncertainty),
+                    'upper_95': float(pred_return + 1.96 * uncertainty),
+                    'confidence': float(max(0.0, min(1.0, 1.0 - uncertainty))),
+                    'direction_prob': float(max(0.0, min(1.0, direction_prob))),
+                    'model_version': (model_info_data.get('version') or 'fallback') if isinstance(model_info_data, dict) else 'fallback',
+                    'features_used': features_used,
+                    'data_freshness': datetime.utcnow().isoformat() + 'Z',
+                    'drift_score': 0.0,
+                }
 
         response = {
             'success': True,
@@ -1437,6 +1452,18 @@ def predict_multi_day_lstm(hist, current_price, days, ticker):
     predictions = []
     
     try:
+        _ultimate_prediction_cache.pop(ticker.upper(), None)
+        # Preferred production path: the user's Ultimate Engine v3.6 model.
+        # It predicts calibrated direction/forward return, then exposes UI-compatible prices.
+        try:
+            from ultimate_stock_engine_v36 import predict_ultimate_realtime
+            ultimate_payload = predict_ultimate_realtime(ticker, hist, current_price=current_price, days=days)
+            if ultimate_payload and ultimate_payload.get('predicted_prices'):
+                _ultimate_prediction_cache[ticker.upper()] = ultimate_payload
+                return ultimate_payload['predicted_prices']
+        except Exception as ultimate_err:
+            print(f"Ultimate Engine prediction unavailable for {ticker}: {ultimate_err}")
+
         current_model = load_lstm_model(ticker)
         
         if current_model is None:

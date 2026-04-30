@@ -1,0 +1,24 @@
+{
+    "ticker": "AAPL",
+    "model_type": "ultimate_regime_ensemble_v36",
+    "version": "v36-production",
+    "trained_at": "2026-04-30T19:05:14.909349Z",
+    "metrics": {
+        "accuracy": 56.74603174603175,
+        "precision": 58.19209039548022,
+        "recall": 74.63768115942028,
+        "f1": 65.39682539682539,
+        "auc": 0.6028053224849564,
+        "total_return": 28.097208628006754,
+        "annualized_return": 8.569554888190511,
+        "sharpe_ratio": 0.6599139610980679,
+        "win_rate": 55.55555555555556,
+        "max_drawdown": 16.91496889692586,
+        "num_trades": 27,
+        "avg_return_per_trade": 1.0225953608833418,
+        "profit_factor": 1.792346655057583
+    },
+    "feature_count": 42,
+    "prediction_horizon": 5,
+    "artifact_path": "mlops\\ultimate_engine\\AAPL\\model.joblib"
+}

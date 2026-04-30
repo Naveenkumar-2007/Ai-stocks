@@ -198,6 +198,26 @@ class MLOpsTrainingPipeline:
             model_info = self._save_and_register(
                 ticker, model, scaler, metrics
             )
+
+            try:
+                if os.getenv('TRAIN_ULTIMATE_ENGINE', 'true').strip().lower() in ('1', 'true', 'yes', 'on'):
+                    from ultimate_stock_engine_v36 import train_ultimate_model
+                    print(f"Step 6b/6: Ultimate Engine v3.6 Training for {ticker}")
+                    ultimate_result = train_ultimate_model(ticker, use_regime=True, generate_charts=False)
+                    if ultimate_result:
+                        model_info['ultimate_engine'] = {
+                            'status': 'success',
+                            'model_version': ultimate_result.get('model_version'),
+                            'accuracy': ultimate_result.get('accuracy'),
+                            'f1': ultimate_result.get('f1'),
+                            'auc': ultimate_result.get('auc'),
+                        }
+            except Exception as ultimate_err:
+                print(f"Ultimate Engine training skipped/failed for {ticker}: {ultimate_err}")
+                model_info['ultimate_engine'] = {
+                    'status': 'failed',
+                    'error': str(ultimate_err)
+                }
             
             # Optional: MLflow model registration
             if HAS_MLFLOW:

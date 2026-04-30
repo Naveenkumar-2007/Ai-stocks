@@ -175,11 +175,37 @@ graph TD
 
 ---
 
-## 📊 Live Model Performance Benchmark (Top 5 Tech Stocks)
+## 📊 Ultimate Engine v3.6 Production Benchmark
 
-![Model Performance Comparison](assets/model_performance_comparison.png)
+The production predictor uses `backend/ultimate_stock_engine_v36.py` as the primary inference engine. The benchmark below was produced locally on **May 1, 2026 IST** using real market data through **April 30, 2026**, with **1,500 daily candles per ticker**, walk-forward validation, regime-aware ensemble models, calibrated probabilities, and a 5-trading-day direction horizon.
 
-*The chart above visualizes the real-world validation backtest of our Dual AI Engine across the top 5 high-volume tech stocks. These models were trained live on fresh market data.*
+The five-stock training universe was reset to the current mega-cap benchmark set:
+
+`NVDA`, `AAPL`, `GOOG`, `MSFT`, `AMZN`
+
+![Ultimate Engine Top 5 Summary](backend/charts/ultimate_top5_summary.png)
+
+| Ticker | Directional Accuracy | Precision | Recall | F1 | AUC | Total Return | Annualized Return | Sharpe | Win Rate | Trades | Max Drawdown | Profit Factor |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| NVDA | 52.78% | 57.26% | 75.79% | 65.24% | 0.576 | +82.51% | +22.11% | 0.94 | 53.49% | 43 | 18.05% | 2.42 |
+| AAPL | 56.75% | 58.19% | 74.64% | 65.40% | 0.603 | +28.10% | +8.57% | 0.66 | 55.56% | 27 | 16.91% | 1.79 |
+| GOOG | 49.07% | 56.43% | 56.56% | 56.50% | 0.558 | +60.62% | +17.04% | 0.84 | 53.33% | 30 | 15.14% | 2.06 |
+| MSFT | 57.28% | 58.92% | 83.33% | 69.03% | 0.599 | +22.46% | +6.96% | 0.57 | 58.62% | 29 | 19.04% | 1.59 |
+| AMZN | 54.89% | 60.93% | 62.73% | 61.81% | 0.557 | +40.23% | +11.88% | 0.93 | 60.71% | 28 | 11.50% | 2.07 |
+
+### Per-Stock Analysis Charts
+
+The following charts are generated from the same real training run and are committed for review while binary model artifacts are produced by the MLOps training runtime.
+
+| Ticker | Main Analysis | Equity Curve | Regimes | Temporal Consistency | Prediction Distribution |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| NVDA | [Main](backend/charts/NVDA_main_analysis.png) | [Equity](backend/charts/NVDA_equity.png) | [Regimes](backend/charts/NVDA_regimes.png) | [Temporal](backend/charts/NVDA_temporal.png) | [Distribution](backend/charts/NVDA_distribution.png) |
+| AAPL | [Main](backend/charts/AAPL_main_analysis.png) | [Equity](backend/charts/AAPL_equity.png) | [Regimes](backend/charts/AAPL_regimes.png) | [Temporal](backend/charts/AAPL_temporal.png) | [Distribution](backend/charts/AAPL_distribution.png) |
+| GOOG | [Main](backend/charts/GOOG_main_analysis.png) | [Equity](backend/charts/GOOG_equity.png) | [Regimes](backend/charts/GOOG_regimes.png) | [Temporal](backend/charts/GOOG_temporal.png) | [Distribution](backend/charts/GOOG_distribution.png) |
+| MSFT | [Main](backend/charts/MSFT_main_analysis.png) | [Equity](backend/charts/MSFT_equity.png) | [Regimes](backend/charts/MSFT_regimes.png) | [Temporal](backend/charts/MSFT_temporal.png) | [Distribution](backend/charts/MSFT_distribution.png) |
+| AMZN | [Main](backend/charts/AMZN_main_analysis.png) | [Equity](backend/charts/AMZN_equity.png) | [Regimes](backend/charts/AMZN_regimes.png) | [Temporal](backend/charts/AMZN_temporal.png) | [Distribution](backend/charts/AMZN_distribution.png) |
+
+Binary model files such as `model.joblib` are intentionally not committed because Hugging Face Spaces rejects raw Git binary pushes. The scheduler/manual MLOps flow retrains and writes those artifacts inside the runtime environment.
 
 ### Understanding the Predictive Edge:
 - **XGBoost Directional Accuracy (Cyan)**: This represents the model's ability to correctly predict the absolute direction of the market (Up vs. Down) over the validation horizon. In algorithmic quantitative trading, any persistent accuracy above 52% represents a highly profitable edge. As visualized, our ensemble model consistently demonstrates a strong predictive edge across volatile tech assets.

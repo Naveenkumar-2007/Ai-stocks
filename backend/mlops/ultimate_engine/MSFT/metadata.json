@@ -1,0 +1,24 @@
+{
+    "ticker": "MSFT",
+    "model_type": "ultimate_regime_ensemble_v36",
+    "version": "v36-production",
+    "trained_at": "2026-04-30T19:07:29.209053Z",
+    "metrics": {
+        "accuracy": 57.27513227513228,
+        "precision": 58.91980360065466,
+        "recall": 83.33333333333334,
+        "f1": 69.03163950143816,
+        "auc": 0.5989654778235025,
+        "total_return": 22.460617119164095,
+        "annualized_return": 6.959365789407523,
+        "sharpe_ratio": 0.5701878607802864,
+        "win_rate": 58.620689655172406,
+        "max_drawdown": 19.040230391430526,
+        "num_trades": 29,
+        "avg_return_per_trade": 0.7880567640738344,
+        "profit_factor": 1.591826400764818
+    },
+    "feature_count": 42,
+    "prediction_horizon": 5,
+    "artifact_path": "mlops\\ultimate_engine\\MSFT\\model.joblib"
+}

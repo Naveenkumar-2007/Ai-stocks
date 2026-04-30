@@ -1,0 +1,24 @@
+{
+    "ticker": "AMZN",
+    "model_type": "ultimate_regime_ensemble_v36",
+    "version": "v36-production",
+    "trained_at": "2026-04-30T19:08:33.010680Z",
+    "metrics": {
+        "accuracy": 54.89417989417989,
+        "precision": 60.9271523178808,
+        "recall": 62.727272727272734,
+        "f1": 61.81410974244122,
+        "auc": 0.5572173475258918,
+        "total_return": 40.22761570917888,
+        "annualized_return": 11.880761270768204,
+        "sharpe_ratio": 0.9324257130861775,
+        "win_rate": 60.71428571428571,
+        "max_drawdown": 11.498777044574373,
+        "num_trades": 28,
+        "avg_return_per_trade": 1.295416137647481,
+        "profit_factor": 2.0713934797253835
+    },
+    "feature_count": 42,
+    "prediction_horizon": 5,
+    "artifact_path": "mlops\\ultimate_engine\\AMZN\\model.joblib"
+}
