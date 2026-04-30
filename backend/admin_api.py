@@ -554,6 +554,7 @@ def reset_mlops_state():
         "deleted_experiment": None,
         "deleted_experiments": [],
         "deleted_registered_models": [],
+        "registered_model_delete_errors": [],
         "error": None
     }
     if wipe_mlflow_experiment or wipe_all_mlflow_experiments or wipe_mlflow_registered_models:
@@ -565,12 +566,23 @@ def reset_mlops_state():
             client = mlflow.tracking.MlflowClient()
 
             if wipe_mlflow_registered_models:
-                for model in client.search_registered_models():
-                    model_name = getattr(model, 'name', '')
-                    if not model_name.startswith('LSTM_'):
-                        continue
-                    client.delete_registered_model(model_name)
-                    mlflow_reset['deleted_registered_models'].append(model_name)
+                model_names = [
+                    getattr(model, 'name', '')
+                    for model in client.search_registered_models()
+                    if getattr(model, 'name', '').startswith('LSTM_')
+                ]
+                for model_name in model_names:
+                    try:
+                        client.delete_registered_model(model_name)
+                        mlflow_reset['deleted_registered_models'].append(model_name)
+                    except Exception as model_exc:
+                        error_text = str(model_exc)
+                        if 'RESOURCE_DOES_NOT_EXIST' in error_text:
+                            continue
+                        mlflow_reset['registered_model_delete_errors'].append({
+                            "model": model_name,
+                            "error": error_text
+                        })
 
             if wipe_all_mlflow_experiments:
                 for exp in client.search_experiments():
