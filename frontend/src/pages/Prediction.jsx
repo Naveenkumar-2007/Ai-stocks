@@ -350,12 +350,18 @@ function Prediction() {
   useEffect(() => {
     const activeTicker = stockData?.ticker || ticker;
     const status = trainingStatus || stockData?.model_status;
+    const displayReady = Boolean(
+      status?.model_ready &&
+      stockData?.prediction_ready &&
+      Array.isArray(stockData?.future_predictions) &&
+      stockData.future_predictions.length > 0
+    );
     const shouldPoll = Boolean(
       activeTicker &&
       stockData &&
       status &&
-      !status.model_ready &&
-      ['queued', 'training', 'preliminary'].includes(status.state)
+      !displayReady &&
+      status.state !== 'failed'
     );
 
     if (!shouldPoll) return undefined;
@@ -601,7 +607,13 @@ function Prediction() {
   const signalIsBullish = headlineSignal.includes('BUY');
   const signalIsBearish = headlineSignal.includes('SELL');
   const activeModelStatus = trainingStatus || stockData?.model_status || {};
-  const isPreliminaryMode = activeModelStatus.analysis_mode === 'preliminary' || !activeModelStatus.model_ready;
+  const predictionIsReady = Boolean(
+    activeModelStatus.model_ready &&
+    stockData?.prediction_ready &&
+    Array.isArray(stockData?.future_predictions) &&
+    stockData.future_predictions.length > 0
+  );
+  const isPreliminaryMode = activeModelStatus.analysis_mode === 'preliminary' || !predictionIsReady;
   const trainingProgress = Number(activeModelStatus.progress ?? 0);
   const trainingStateLabel = activeModelStatus.model_ready
     ? 'Custom AI Ready'
@@ -710,7 +722,7 @@ function Prediction() {
                 className="w-full bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 disabled:from-gray-400 disabled:to-gray-500 disabled:cursor-not-allowed text-white px-10 py-5 rounded-2xl flex items-center justify-center gap-3 transition-all transform hover:scale-[1.01] active:scale-95 text-xl font-bold font-display shadow-xl hover:shadow-cyan-500/30"
               >
                 <Search className="w-6 h-6" />
-                Start AI Prediction
+                Predict
               </button>
             </form>
           </div>
@@ -828,7 +840,7 @@ function Prediction() {
               className="w-full sm:w-auto bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white px-6 py-3 sm:px-8 sm:py-3 rounded-lg flex items-center justify-center gap-2 transition transform hover:scale-105 active:scale-95 text-base sm:text-lg font-semibold touch-target active-scale ripple shadow-lg hover:shadow-cyan-500/25"
             >
               <Search className="w-5 h-5" />
-              Analyze Stock
+              Predict
             </button>
           </form>
         </div>
@@ -843,7 +855,45 @@ function Prediction() {
         </div>
       )}
 
-      {stockData && (
+      {stockData && !predictionIsReady && (
+        <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 pb-10">
+          <div className="min-h-[58vh] flex items-center justify-center">
+            <div className="w-full rounded-2xl border border-blue-200 dark:border-blue-500/30 bg-white dark:bg-gray-900 shadow-xl p-6 sm:p-10 text-center">
+              <div className="mx-auto w-14 h-14 rounded-2xl bg-blue-50 dark:bg-blue-500/10 border border-blue-200 dark:border-blue-500/30 flex items-center justify-center mb-5">
+                <Activity className="w-7 h-7 text-blue-600 dark:text-blue-400 animate-pulse" />
+              </div>
+              <p className="text-xs font-black uppercase tracking-wide text-blue-700 dark:text-blue-400">
+                Backend Training
+              </p>
+              <h2 className="mt-2 text-2xl sm:text-4xl font-black text-gray-900 dark:text-white">
+                {stockData.ticker} model is getting ready
+              </h2>
+              <p className="mt-3 text-sm sm:text-base font-medium text-gray-600 dark:text-gray-400 max-w-xl mx-auto">
+                Please wait about 2 minutes. The page is connected to backend training and will automatically show real predictions, charts, and signals when the model is ready.
+              </p>
+
+              <div className="mt-7 grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl mx-auto">
+                <div className="rounded-xl border border-cyan-200 dark:border-cyan-500/30 bg-cyan-50 dark:bg-cyan-500/10 p-5 text-left">
+                  <p className="text-xs font-bold uppercase text-cyan-700 dark:text-cyan-400">Current Price</p>
+                  <p className="mt-2 text-3xl font-black text-gray-900 dark:text-white">${stockData.current_price}</p>
+                  <p className={`mt-1 text-sm font-bold ${stockData.day_change >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                    {stockData.day_change >= 0 ? '+' : ''}{stockData.day_change.toFixed(2)} ({stockData.day_change_percent.toFixed(2)}%)
+                  </p>
+                </div>
+                <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 p-5 text-left">
+                  <p className="text-xs font-bold uppercase text-gray-500 dark:text-gray-400">Status</p>
+                  <p className="mt-2 text-lg font-black text-gray-900 dark:text-white">{trainingStateLabel}</p>
+                  <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
+                    {activeModelStatus.message || 'Training is running in the background.'}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </main>
+      )}
+
+      {stockData && predictionIsReady && (
         <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-8">
           {/* Stock Header */}
           <div className="bg-gradient-to-br from-white to-gray-50 dark:from-gray-800 dark:to-gray-900 rounded-2xl shadow-xl p-5 sm:p-7 mb-5 sm:mb-7 border border-gray-200 dark:border-gray-700 hover:shadow-2xl transition-shadow duration-300">

@@ -1577,6 +1577,39 @@ def get_stock_data(ticker):
             resolved_ticker,
             prediction_ready=bool(len(predictions) > 0 and _ticker_has_trained_model(resolved_ticker))
         )
+        trained_prediction_ready = bool(model_status.get('model_ready') and len(predictions) > 0)
+        if not trained_prediction_ready:
+            predictions = []
+            future_predictions = []
+            predicted_volumes = []
+            tomorrow_prediction = current_price
+            profit_loss = 0.0
+            profit_loss_percent = 0.0
+            ai_signal = 'TRAINING'
+            final_decision = None
+            v2_payload = {
+                'prediction': 0.0,
+                'lower_95': 0.0,
+                'upper_95': 0.0,
+                'confidence': 0.0,
+                'direction_prob': 0.5,
+                'model_version': 'training',
+                'features_used': [],
+                'data_freshness': datetime.utcnow().isoformat() + 'Z',
+                'drift_score': 0.0,
+            }
+
+        recommendation_payload = final_decision.to_dict() if final_decision else {
+            'signal': ai_signal,
+            'stance': 'Training In Progress' if not trained_prediction_ready else 'Uncertain Market',
+            'confidence': 0,
+            'confidence_percent': 0,
+            'reasons': [
+                'Backend training is still running. Real prediction prices will be shown after the trained model is ready.'
+                if not trained_prediction_ready
+                else 'Decision engine unavailable; defaulted to conservative display.'
+            ]
+        }
 
         response = {
             'success': True,
@@ -1592,21 +1625,15 @@ def get_stock_data(ticker):
             'profit_loss_percent': safe_float(profit_loss_percent),
             'is_profit': bool(profit_loss > 0),
             'ai_signal': ai_signal,
-            'recommendation': final_decision.to_dict() if final_decision else {
-                'signal': ai_signal,
-                'stance': 'Uncertain Market',
-                'confidence': 0,
-                'confidence_percent': 0,
-                'reasons': ['Decision engine unavailable; defaulted to conservative display.']
-            },
+            'recommendation': recommendation_payload,
             'day_change': safe_float(day_change),
             'day_change_percent': safe_float(day_change_percent),
             'day_high': safe_float(day_high),
             'day_low': safe_float(day_low),
             'volume': volume,
             'predicted_volume': predicted_volumes,
-            'is_training': model_status.get('is_training') or len(predictions) == 0,
-            'prediction_ready': bool(model_status.get('model_ready') and len(predictions) > 0),
+            'is_training': not trained_prediction_ready,
+            'prediction_ready': trained_prediction_ready,
             'analysis_mode': model_status.get('analysis_mode'),
             'model_status': model_status,
             'market_cap': market_cap,
