@@ -21,7 +21,6 @@ backend/mlruns/
 backend/logs/
 backend/cache/
 backend/artifacts/
-backend/charts/
 backend/monitoring/reports/
 backend/monitoring/tuning/
 backend/data/raw/
