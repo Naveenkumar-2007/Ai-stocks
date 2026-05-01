@@ -187,11 +187,13 @@ def _best_threshold(y_true, probs):
 
 
 def save_ultimate_model(ticker, artifact):
+    """Save model locally AND to MLflow/DagsHub for cloud persistence."""
+    ticker = ticker.upper()
     paths = _ultimate_paths(ticker)
     os.makedirs(paths['dir'], exist_ok=True)
     joblib.dump(artifact, paths['artifact'])
     metadata = {
-        'ticker': ticker.upper(),
+        'ticker': ticker,
         'model_type': 'ultimate_regime_ensemble_v36',
         'version': artifact.get('version', 'v36'),
         'trained_at': artifact.get('trained_at'),
@@ -202,20 +204,85 @@ def save_ultimate_model(ticker, artifact):
     }
     with open(paths['metadata'], 'w', encoding='utf-8') as f:
         json.dump(metadata, f, indent=4)
-    ULTIMATE_MODEL_CACHE[ticker.upper()] = artifact
+    ULTIMATE_MODEL_CACHE[ticker] = artifact
+
+    # --- Log to MLflow / DagsHub (cloud persistence) ---
+    try:
+        import mlflow
+        from mlops.config import MLOpsConfig
+        mlflow.set_tracking_uri(MLOpsConfig.MLFLOW_TRACKING_URI)
+        mlflow.set_experiment(f"ultimate_engine_v36")
+
+        with mlflow.start_run(run_name=f"v36-{ticker}-{datetime.utcnow().strftime('%Y%m%d')}"):
+            # Log metrics
+            metrics = artifact.get('metrics', {})
+            for key, val in metrics.items():
+                if isinstance(val, (int, float)):
+                    mlflow.log_metric(key, float(val))
+
+            # Log params
+            mlflow.log_param("ticker", ticker)
+            mlflow.log_param("version", artifact.get('version', 'v36'))
+            mlflow.log_param("feature_count", len(artifact.get('feature_cols', [])))
+            mlflow.log_param("prediction_horizon", PREDICTION_HORIZON)
+
+            # Log model artifact to DagsHub
+            mlflow.log_artifact(paths['artifact'], artifact_path=f"models/{ticker}")
+            mlflow.log_artifact(paths['metadata'], artifact_path=f"models/{ticker}")
+
+        print(f"  ☁️ Model logged to MLflow/DagsHub for {ticker}")
+    except Exception as mlflow_err:
+        print(f"  ⚠️ MLflow logging skipped for {ticker}: {mlflow_err}")
+
     return metadata
 
 
 def load_ultimate_model(ticker):
+    """Load model from cache → local disk → MLflow/DagsHub (cloud)."""
     ticker = ticker.upper()
     if ticker in ULTIMATE_MODEL_CACHE:
         return ULTIMATE_MODEL_CACHE[ticker]
+
+    # Try local disk first
     paths = _ultimate_paths(ticker)
-    if not os.path.exists(paths['artifact']):
-        return None
-    artifact = joblib.load(paths['artifact'])
-    ULTIMATE_MODEL_CACHE[ticker] = artifact
-    return artifact
+    if os.path.exists(paths['artifact']):
+        artifact = joblib.load(paths['artifact'])
+        ULTIMATE_MODEL_CACHE[ticker] = artifact
+        return artifact
+
+    # Try MLflow/DagsHub (for cloud deployment where local models don't exist)
+    try:
+        import mlflow
+        from mlflow.tracking import MlflowClient
+        from mlops.config import MLOpsConfig
+        mlflow.set_tracking_uri(MLOpsConfig.MLFLOW_TRACKING_URI)
+
+        client = MlflowClient()
+        experiment = client.get_experiment_by_name("ultimate_engine_v36")
+        if experiment:
+            runs = client.search_runs(
+                experiment_ids=[experiment.experiment_id],
+                filter_string=f"params.ticker = '{ticker}'",
+                order_by=["start_time DESC"],
+                max_results=1,
+            )
+            if runs:
+                run = runs[0]
+                # Download model artifact from DagsHub
+                artifact_uri = f"{run.info.artifact_uri}/models/{ticker}/model.joblib"
+                local_path = mlflow.artifacts.download_artifacts(
+                    artifact_uri=artifact_uri,
+                    dst_path=paths['dir']
+                )
+                if os.path.exists(local_path):
+                    artifact = joblib.load(local_path)
+                    ULTIMATE_MODEL_CACHE[ticker] = artifact
+                    print(f"  ☁️ Loaded {ticker} model from MLflow/DagsHub")
+                    return artifact
+    except Exception as mlflow_err:
+        print(f"  ⚠️ MLflow load failed for {ticker}: {mlflow_err}")
+
+    return None
 
 RF_PARAMS = {
     'n_estimators': 80,
@@ -953,12 +1020,11 @@ def process_ticker(ticker, use_regime=True, generate_charts=True):
             df, info = get_stock_history(ticker, days=1500, return_info=True)
             print(f"✅ Source: {info.get('source', 'unknown')} | Rows: {len(df)}")
         except Exception as e:
-            print(f"⚠️ API failed: {e}, using yfinance")
-            df = yf.download(ticker, start='2019-01-01', end=(datetime.utcnow() + timedelta(days=1)).strftime('%Y-%m-%d'), progress=False)
-            df.columns = [c[0] if isinstance(c, tuple) else c for c in df.columns]
+            print(f"❌ Real API failed for {ticker}: {e}")
+            return None
     else:
-        df = yf.download(ticker, start='2019-01-01', end=(datetime.utcnow() + timedelta(days=1)).strftime('%Y-%m-%d'), progress=False)
-        df.columns = [c[0] if isinstance(c, tuple) else c for c in df.columns]
+        print(f"❌ No real API configured")
+        return None
     
     if len(df) < MIN_TRAIN_DAYS + 100:
         print(f"❌ Insufficient data")

@@ -1,4 +1,4 @@
-﻿# Python & Generic
+# Python & Generic
 __pycache__/
 *.py[cod]
 *$py.class
@@ -66,3 +66,9 @@ frontend/.env.local
 *.pkl
 # Chat Storage
 backend/chatbot/app/chat_storage/*.json
+*.joblib
+backend/unified_engine/models/
+backend/unified_engine/training_results.json
+backend/unified_engine/_prediction_logs/
+backend/v36_training_results.json
+backend/charts/

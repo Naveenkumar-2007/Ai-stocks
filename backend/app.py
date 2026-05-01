@@ -330,7 +330,20 @@ def load_lstm_model(ticker):
 
         def background_train():
             try:
-                # Train V1 first (powers multi-day LSTM charting & prediction endpoints)
+                # Train Unified Engine v4.0 FIRST (primary prediction path)
+                try:
+                    from unified_engine.training import UnifiedTrainer
+                    print(f"Background Unified Engine v4.0 training started for {ticker}")
+                    ue_result = UnifiedTrainer.train(ticker)
+                    if ue_result.success:
+                        print(f"Unified Engine v4.0 completed for {ticker}: "
+                              f"accuracy={ue_result.metrics.get('accuracy', 0):.1f}%")
+                    else:
+                        print(f"Unified Engine v4.0 skipped for {ticker}: {ue_result.reason}")
+                except Exception as unified_err:
+                    print(f"Unified Engine v4.0 error for {ticker}: {unified_err}")
+
+                # Train V1 (powers multi-day LSTM charting & prediction endpoints)
                 try:
                     from mlops.training_pipeline import MLOpsTrainingPipeline
                     pipeline = MLOpsTrainingPipeline()
@@ -1444,8 +1457,84 @@ def admin_system_health():
 
     return jsonify({'success': True, 'metrics': metrics})
 
+# =============================================================================
+# UNIFIED ENGINE v4.0 API ENDPOINTS
+# =============================================================================
+
+@app.route('/api/unified/train/<ticker>', methods=['POST'])
+@firebase_auth_required(admin_only=True)
+def unified_train_ticker(ticker):
+    """Train Unified Engine v4.0 model for a specific ticker (admin only)."""
+    try:
+        from unified_engine.training import UnifiedTrainer
+        result = UnifiedTrainer.train(ticker)
+        return jsonify({
+            'success': result.success,
+            'ticker': result.ticker,
+            'reason': result.reason,
+            'metrics': result.metrics,
+            'model_version': result.model_version,
+            'selected_features': result.selected_features,
+            'trained_at': result.trained_at,
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/unified/health/<ticker>')
+def unified_model_health(ticker):
+    """Get Unified Engine model health and prediction tracking for a ticker."""
+    try:
+        from unified_engine.inference import UnifiedPredictor
+        from unified_engine.monitoring import get_model_health, get_prediction_history
+
+        metadata = UnifiedPredictor.get_model_metadata(ticker)
+        health = get_model_health(ticker)
+        history = get_prediction_history(ticker, limit=10)
+
+        return jsonify({
+            'success': True,
+            'ticker': ticker.upper(),
+            'model_available': UnifiedPredictor.is_model_available(ticker),
+            'metadata': metadata,
+            'health': health,
+            'recent_predictions': history,
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/unified/status')
+def unified_engine_status():
+    """Get overall Unified Engine v4.0 status."""
+    try:
+        from unified_engine.config import CONFIG
+        from unified_engine.inference import UnifiedPredictor
+
+        model_dir = CONFIG.model_dir
+        trained_tickers = []
+        if model_dir.exists():
+            for d in model_dir.iterdir():
+                if d.is_dir() and (d / 'model.joblib').exists():
+                    trained_tickers.append(d.name)
+
+        return jsonify({
+            'success': True,
+            'engine': 'Unified Engine v4.0',
+            'trained_tickers': sorted(trained_tickers),
+            'total_models': len(trained_tickers),
+            'model_dir': str(model_dir),
+            'config': {
+                'prediction_horizon': CONFIG.prediction_horizon,
+                'fetch_days': CONFIG.fetch_days,
+                'purge_days': CONFIG.wf_purge_days,
+                'embargo_days': CONFIG.wf_embargo_days,
+                'max_features': CONFIG.max_features,
+            }
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 def predict_multi_day_lstm(hist, current_price, days, ticker):
-    """Predict multiple days ahead using LSTM model for ANY ticker"""
+    """Predict multiple days ahead — Unified Engine v4.0 is the primary path."""
     import numpy as np
     import ta as ta_lib
     
@@ -1453,16 +1542,66 @@ def predict_multi_day_lstm(hist, current_price, days, ticker):
     
     try:
         _ultimate_prediction_cache.pop(ticker.upper(), None)
-        # Preferred production path: the user's Ultimate Engine v3.6 model.
-        # It predicts calibrated direction/forward return, then exposes UI-compatible prices.
+
+        # =====================================================================
+        # PRIMARY PATH: Ultimate Engine v3.6 (PROVEN — real backtested results)
+        # 4-model ensemble + regime detection + calibrated predictions
+        # =====================================================================
         try:
-            from ultimate_stock_engine_v36 import predict_ultimate_realtime
+            from ultimate_stock_engine_v36 import predict_ultimate_realtime, load_ultimate_model, train_ultimate_model
             ultimate_payload = predict_ultimate_realtime(ticker, hist, current_price=current_price, days=days)
             if ultimate_payload and ultimate_payload.get('predicted_prices'):
                 _ultimate_prediction_cache[ticker.upper()] = ultimate_payload
+                print(f"✅ v3.6 prediction for {ticker}: signal={ultimate_payload.get('signal')}, "
+                      f"prob={ultimate_payload.get('direction_prob', 0):.3f}, "
+                      f"confidence={ultimate_payload.get('confidence', 0):.3f}")
+                
+                # Update Prometheus metrics for Grafana
+                try:
+                    from mlops_v2.monitoring import set_accuracy_20d, set_simulated_pnl, set_sharpe_ratio, inc_prediction
+                    metrics = ultimate_payload.get('metrics', {})
+                    if 'accuracy' in metrics:
+                        set_accuracy_20d(ticker.upper(), metrics['accuracy'])
+                    if 'total_return' in metrics:
+                        set_simulated_pnl(ticker.upper(), metrics['total_return'])
+                    if 'sharpe_ratio' in metrics:
+                        set_sharpe_ratio(ticker.upper(), metrics['sharpe_ratio'])
+                    inc_prediction(ticker.upper())
+                except Exception as metric_err:
+                    print(f"⚠️ Prometheus metrics update failed for {ticker}: {metric_err}")
+                    
                 return ultimate_payload['predicted_prices']
+            else:
+                # No trained model exists — trigger on-demand v3.6 training
+                print(f"⚠️ No v3.6 model for {ticker}. Triggering on-demand training...")
+                try:
+                    train_result = train_ultimate_model(ticker, use_regime=True, generate_charts=False)
+                    if train_result:
+                        # Retry prediction after training
+                        ultimate_payload = predict_ultimate_realtime(ticker, hist, current_price=current_price, days=days)
+                        if ultimate_payload and ultimate_payload.get('predicted_prices'):
+                            _ultimate_prediction_cache[ticker.upper()] = ultimate_payload
+                            print(f"✅ v3.6 on-demand prediction for {ticker}: signal={ultimate_payload.get('signal')}")
+                            
+                            # Update Prometheus metrics for Grafana
+                            try:
+                                from mlops_v2.monitoring import set_accuracy_20d, set_simulated_pnl, set_sharpe_ratio, inc_prediction
+                                metrics = ultimate_payload.get('metrics', {})
+                                if 'accuracy' in metrics:
+                                    set_accuracy_20d(ticker.upper(), metrics['accuracy'])
+                                if 'total_return' in metrics:
+                                    set_simulated_pnl(ticker.upper(), metrics['total_return'])
+                                if 'sharpe_ratio' in metrics:
+                                    set_sharpe_ratio(ticker.upper(), metrics['sharpe_ratio'])
+                                inc_prediction(ticker.upper())
+                            except Exception as metric_err:
+                                print(f"⚠️ Prometheus metrics update failed for {ticker}: {metric_err}")
+                                
+                            return ultimate_payload['predicted_prices']
+                except Exception as train_err:
+                    print(f"⚠️ On-demand v3.6 training failed for {ticker}: {train_err}")
         except Exception as ultimate_err:
-            print(f"Ultimate Engine prediction unavailable for {ticker}: {ultimate_err}")
+            print(f"Ultimate Engine v3.6 unavailable for {ticker}: {ultimate_err}")
 
         current_model = load_lstm_model(ticker)
         
