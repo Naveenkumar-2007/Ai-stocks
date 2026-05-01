@@ -247,43 +247,216 @@ const parseDateLocal = (dateStr) => {
   return new Date(year, month - 1, day);
 };
 
+const TradingViewStyleChart = ({ candles = [], sma20 = [], predictions = [], isProfit }) => {
+  const width = 960;
+  const height = 430;
+  const pad = { top: 24, right: 78, bottom: 58, left: 58 };
+  const volumeHeight = 72;
+  const priceBottom = height - pad.bottom - volumeHeight;
+  const priceHeight = priceBottom - pad.top;
+  const plotWidth = width - pad.left - pad.right;
+  const visibleCandles = candles.slice(-42).filter((candle) =>
+    Number.isFinite(Number(candle.open)) &&
+    Number.isFinite(Number(candle.high)) &&
+    Number.isFinite(Number(candle.low)) &&
+    Number.isFinite(Number(candle.close))
+  );
+
+  if (visibleCandles.length === 0) {
+    return (
+      <div className="h-[340px] flex items-center justify-center text-sm font-semibold text-gray-500 dark:text-gray-400">
+        Chart data is not available.
+      </div>
+    );
+  }
+
+  const futurePoints = predictions.slice(0, 8).filter((point) => Number.isFinite(Number(point.price)));
+  const smaByDate = new Map((sma20 || []).map((point) => [point.date, Number(point.value)]));
+  const priceValues = visibleCandles.flatMap((candle) => [
+    Number(candle.open),
+    Number(candle.high),
+    Number(candle.low),
+    Number(candle.close)
+  ]);
+  visibleCandles.forEach((candle) => {
+    const smaValue = smaByDate.get(candle.date);
+    if (Number.isFinite(smaValue)) priceValues.push(smaValue);
+  });
+  futurePoints.forEach((point) => priceValues.push(Number(point.price)));
+
+  const minPrice = Math.min(...priceValues);
+  const maxPrice = Math.max(...priceValues);
+  const pricePadding = Math.max((maxPrice - minPrice) * 0.14, maxPrice * 0.004, 0.5);
+  const lowBound = minPrice - pricePadding;
+  const highBound = maxPrice + pricePadding;
+  const priceRange = highBound - lowBound || 1;
+  const maxVolume = Math.max(...visibleCandles.map((candle) => Number(candle.volume) || 0), 1);
+  const pointCount = visibleCandles.length + futurePoints.length;
+  const step = plotWidth / Math.max(pointCount - 1, 1);
+  const candleWidth = Math.max(5, Math.min(12, step * 0.58));
+
+  const xForIndex = (index) => pad.left + index * step;
+  const yForPrice = (price) => pad.top + ((highBound - Number(price)) / priceRange) * priceHeight;
+  const yForVolume = (volume) => {
+    const ratio = Math.max(0, Math.min(1, (Number(volume) || 0) / maxVolume));
+    return height - pad.bottom - ratio * volumeHeight;
+  };
+  const formatPrice = (value) => `$${Number(value).toFixed(2)}`;
+  const formatDate = (date) => parseDateLocal(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  const gridPrices = Array.from({ length: 5 }, (_, index) => lowBound + (priceRange * index) / 4).reverse();
+
+  let hasSmaStart = false;
+  const smaPath = visibleCandles
+    .map((candle, index) => {
+      const value = smaByDate.get(candle.date);
+      if (!Number.isFinite(value)) return null;
+      const command = hasSmaStart ? 'L' : 'M';
+      hasSmaStart = true;
+      return `${command} ${xForIndex(index).toFixed(1)} ${yForPrice(value).toFixed(1)}`;
+    })
+    .filter(Boolean)
+    .join(' ');
+
+  const predictionPath = futurePoints.length > 0
+    ? [
+      `M ${xForIndex(visibleCandles.length - 1).toFixed(1)} ${yForPrice(visibleCandles[visibleCandles.length - 1].close).toFixed(1)}`,
+      ...futurePoints.map((point, index) =>
+        `L ${xForIndex(visibleCandles.length + index).toFixed(1)} ${yForPrice(point.price).toFixed(1)}`
+      )
+    ].join(' ')
+    : '';
+
+  return (
+    <div className="w-full overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#0b1220]">
+      <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-[330px] sm:h-[390px] lg:h-[420px]" role="img" aria-label="Stock candlestick chart">
+        <defs>
+          <clipPath id="pricePlotClip">
+            <rect x={pad.left} y={pad.top} width={plotWidth} height={priceHeight} />
+          </clipPath>
+        </defs>
+        <rect x="0" y="0" width={width} height={height} fill="currentColor" className="text-white dark:text-[#0b1220]" />
+        {gridPrices.map((price) => {
+          const y = yForPrice(price);
+          return (
+            <g key={`grid-${price}`}>
+              <line x1={pad.left} x2={width - pad.right} y1={y} y2={y} stroke="#94a3b8" strokeOpacity="0.2" strokeDasharray="4 6" />
+              <text x={width - pad.right + 10} y={y + 4} fill="#94a3b8" fontSize="12" fontWeight="600">{formatPrice(price)}</text>
+            </g>
+          );
+        })}
+        <line x1={pad.left} x2={width - pad.right} y1={priceBottom} y2={priceBottom} stroke="#94a3b8" strokeOpacity="0.35" />
+
+        <g clipPath="url(#pricePlotClip)">
+          {visibleCandles.map((candle, index) => {
+            const x = xForIndex(index);
+            const open = Number(candle.open);
+            const high = Number(candle.high);
+            const low = Number(candle.low);
+            const close = Number(candle.close);
+            const rising = close >= open;
+            const color = rising ? '#00b386' : '#ff4d4f';
+            const yHigh = yForPrice(high);
+            const yLow = yForPrice(low);
+            const yOpen = yForPrice(open);
+            const yClose = yForPrice(close);
+            const bodyY = Math.min(yOpen, yClose);
+            const bodyHeight = Math.max(Math.abs(yClose - yOpen), 2);
+
+            return (
+              <g key={candle.date}>
+                <title>{`${formatDate(candle.date)} O ${formatPrice(open)} H ${formatPrice(high)} L ${formatPrice(low)} C ${formatPrice(close)} Vol ${formatVolume(candle.volume)}`}</title>
+                <line x1={x} x2={x} y1={yHigh} y2={yLow} stroke={color} strokeWidth="1.5" strokeLinecap="round" />
+                <rect
+                  x={x - candleWidth / 2}
+                  y={bodyY}
+                  width={candleWidth}
+                  height={bodyHeight}
+                  rx="1.5"
+                  fill={rising ? color : 'transparent'}
+                  stroke={color}
+                  strokeWidth="1.7"
+                />
+              </g>
+            );
+          })}
+          {smaPath && <path d={smaPath} fill="none" stroke="#f59e0b" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" />}
+          {predictionPath && <path d={predictionPath} fill="none" stroke={isProfit ? '#10b981' : '#ef4444'} strokeWidth="2.8" strokeDasharray="7 6" strokeLinecap="round" strokeLinejoin="round" />}
+        </g>
+
+        {visibleCandles.map((candle, index) => {
+          const x = xForIndex(index);
+          const volY = yForVolume(candle.volume);
+          const rising = Number(candle.close) >= Number(candle.open);
+          return (
+            <rect
+              key={`volume-${candle.date}`}
+              x={x - candleWidth / 2}
+              y={volY}
+              width={candleWidth}
+              height={height - pad.bottom - volY}
+              fill={rising ? '#2dd4bf' : '#fca5a5'}
+              opacity="0.28"
+              rx="1"
+            />
+          );
+        })}
+
+        {visibleCandles.map((candle, index) => {
+          if (index % Math.ceil(visibleCandles.length / 7) !== 0 && index !== visibleCandles.length - 1) return null;
+          return (
+            <text key={`date-${candle.date}`} x={xForIndex(index)} y={height - 26} fill="#94a3b8" fontSize="12" textAnchor="middle">
+              {formatDate(candle.date)}
+            </text>
+          );
+        })}
+
+        <g transform={`translate(${pad.left}, ${height - 14})`}>
+          <rect width="10" height="10" fill="#00b386" rx="2" />
+          <text x="16" y="10" fill="#94a3b8" fontSize="12" fontWeight="600">Up</text>
+          <rect x="54" width="10" height="10" fill="transparent" stroke="#ff4d4f" rx="2" />
+          <text x="70" y="10" fill="#94a3b8" fontSize="12" fontWeight="600">Down</text>
+          <line x1="132" x2="154" y1="5" y2="5" stroke="#f59e0b" strokeWidth="2.1" />
+          <text x="160" y="10" fill="#94a3b8" fontSize="12" fontWeight="600">SMA 20</text>
+          {predictionPath && (
+            <>
+              <line x1="226" x2="250" y1="5" y2="5" stroke={isProfit ? '#10b981' : '#ef4444'} strokeWidth="2.8" strokeDasharray="5 5" />
+              <text x="256" y="10" fill="#94a3b8" fontSize="12" fontWeight="600">AI Prediction</text>
+            </>
+          )}
+        </g>
+      </svg>
+    </div>
+  );
+};
+
 function Prediction() {
   const { currentUser } = useAuth();
 
-  // Persistence Helpers
-  const getSaved = (key, fallback) => {
-    try {
-      const saved = localStorage.getItem(key);
-      return saved ? JSON.parse(saved) : fallback;
-    } catch (e) {
-      return fallback;
-    }
-  };
-
-  const [ticker, setTicker] = useState(() => localStorage.getItem('prediction_ticker') || '');
+  const [ticker, setTicker] = useState('');
   const [days, setDays] = useState(() => Number(localStorage.getItem('prediction_days')) || 7);
-  const [stockData, setStockData] = useState(() => getSaved('prediction_stock_data', null));
-  const [sentiment, setSentiment] = useState(() => getSaved('prediction_sentiment', null));
-  const [news, setNews] = useState(() => getSaved('prediction_news', []));
-  const [trainingStatus, setTrainingStatus] = useState(() => getSaved('prediction_training_status', null));
+  const [stockData, setStockData] = useState(null);
+  const [sentiment, setSentiment] = useState(null);
+  const [news, setNews] = useState([]);
+  const [trainingStatus, setTrainingStatus] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [suggestions, setSuggestions] = useState([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [performancePeriod, setPerformancePeriod] = useState('1M');
-  const [hasSearched, setHasSearched] = useState(() => localStorage.getItem('prediction_has_searched') === 'true');
+  const [hasSearched, setHasSearched] = useState(false);
   const [visibleNewsCount, setVisibleNewsCount] = useState(5);
 
-  // Save state on changes
+  // Keep only user preference. Do not persist stock results, otherwise a
+  // previous ticker can auto-open when the user returns to this page.
   useEffect(() => {
-    localStorage.setItem('prediction_ticker', ticker);
     localStorage.setItem('prediction_days', days.toString());
-    localStorage.setItem('prediction_has_searched', hasSearched.toString());
-    if (stockData) localStorage.setItem('prediction_stock_data', JSON.stringify(stockData));
-    if (sentiment) localStorage.setItem('prediction_sentiment', JSON.stringify(sentiment));
-    if (news) localStorage.setItem('prediction_news', JSON.stringify(news));
-    if (trainingStatus) localStorage.setItem('prediction_training_status', JSON.stringify(trainingStatus));
-  }, [ticker, days, stockData, sentiment, news, trainingStatus, hasSearched]);
+    localStorage.removeItem('prediction_ticker');
+    localStorage.removeItem('prediction_has_searched');
+    localStorage.removeItem('prediction_stock_data');
+    localStorage.removeItem('prediction_sentiment');
+    localStorage.removeItem('prediction_news');
+    localStorage.removeItem('prediction_training_status');
+  }, [days]);
 
   // Filter performance data based on selected period
   const getPerformanceData = () => {
@@ -615,15 +788,20 @@ function Prediction() {
   );
   const isPreliminaryMode = activeModelStatus.analysis_mode === 'preliminary' || !predictionIsReady;
   const trainingProgress = Number(activeModelStatus.progress ?? 0);
-  const trainingStateLabel = activeModelStatus.model_ready
-    ? 'Custom AI Ready'
-    : activeModelStatus.state === 'training'
-      ? 'Custom AI Training'
-      : activeModelStatus.state === 'queued'
-        ? 'Training Queued'
-        : activeModelStatus.state === 'failed'
-          ? 'Training Needs Retry'
-          : 'Preliminary Analysis';
+  const trainingStateLabel = predictionIsReady
+    ? 'Prediction Ready'
+    : activeModelStatus.model_ready
+      ? 'Preparing Prediction'
+      : activeModelStatus.state === 'training'
+        ? 'Backend Training'
+        : activeModelStatus.state === 'queued'
+          ? 'Training Queued'
+          : activeModelStatus.state === 'failed'
+            ? 'Training Needs Retry'
+            : 'Starting Training';
+  const trainingStatusMessage = predictionIsReady
+    ? 'Real prediction data is ready.'
+    : 'Backend training is still preparing real prediction data. The page will update automatically.';
 
   // Empty state - show beautiful placeholder when no stock is selected (FIRST VISIT)
   if (!hasSearched && !loading && !stockData && !error) {
@@ -730,8 +908,8 @@ function Prediction() {
           {/* Quick Access Stocks */}
           <div className="text-center relative z-10">
             <p className="text-sm font-bold text-gray-400 dark:text-gray-500 mb-6 uppercase tracking-[0.2em]">Popular Market Symbols</p>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 sm:gap-6">
-              {['AAPL', 'TSLA', 'MSFT', 'GOOGL'].map((symbol) => (
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 sm:gap-6">
+              {['AAPL', 'TSLA', 'MSFT', 'GOOGL', 'NVDA'].map((symbol) => (
                 <button
                   key={symbol}
                   onClick={() => {
@@ -745,7 +923,7 @@ function Prediction() {
                   <p className="text-2xl sm:text-3xl font-black text-gray-800 dark:text-white group-hover:text-cyan-600 dark:group-hover:text-cyan-400 transition-colors relative z-10">
                     {symbol}
                   </p>
-                  <p className="text-xs font-bold text-gray-400 dark:text-gray-500 mt-2 relative z-10 uppercase tracking-widest">Analyze</p>
+                  <p className="text-xs font-bold text-gray-400 dark:text-gray-500 mt-2 relative z-10 uppercase tracking-widest">Predict</p>
                 </button>
               ))}
             </div>
@@ -778,6 +956,46 @@ function Prediction() {
             <div className="w-2 h-2 bg-cyan-600 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
           </div>
         </div>
+      </div>
+    );
+  }
+
+  if (stockData && !predictionIsReady) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-gray-50 via-blue-50 to-cyan-50 dark:from-gray-900 dark:via-gray-900 dark:to-gray-800 flex items-center justify-center px-4 py-10">
+        <main className="w-full max-w-4xl">
+          <div className="w-full rounded-2xl border border-blue-200 dark:border-blue-500/30 bg-white dark:bg-gray-900 shadow-xl p-6 sm:p-10 text-center">
+            <div className="mx-auto w-14 h-14 rounded-2xl bg-blue-50 dark:bg-blue-500/10 border border-blue-200 dark:border-blue-500/30 flex items-center justify-center mb-5">
+              <Activity className="w-7 h-7 text-blue-600 dark:text-blue-400 animate-pulse" />
+            </div>
+            <p className="text-xs font-black uppercase tracking-wide text-blue-700 dark:text-blue-400">
+              Backend Training
+            </p>
+            <h2 className="mt-2 text-2xl sm:text-4xl font-black text-gray-900 dark:text-white">
+              {stockData.ticker} model is getting ready
+            </h2>
+            <p className="mt-3 text-sm sm:text-base font-medium text-gray-600 dark:text-gray-400 max-w-xl mx-auto">
+              Please wait about 2 minutes. This page is connected to backend training and will automatically show real predictions, charts, and signals when the model is ready.
+            </p>
+
+            <div className="mt-7 grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl mx-auto">
+              <div className="rounded-xl border border-cyan-200 dark:border-cyan-500/30 bg-cyan-50 dark:bg-cyan-500/10 p-5 text-left">
+                <p className="text-xs font-bold uppercase text-cyan-700 dark:text-cyan-400">Current Price</p>
+                <p className="mt-2 text-3xl font-black text-gray-900 dark:text-white">${stockData.current_price}</p>
+                <p className={`mt-1 text-sm font-bold ${stockData.day_change >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                  {stockData.day_change >= 0 ? '+' : ''}{stockData.day_change.toFixed(2)} ({stockData.day_change_percent.toFixed(2)}%)
+                </p>
+              </div>
+              <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 p-5 text-left">
+                <p className="text-xs font-bold uppercase text-gray-500 dark:text-gray-400">Status</p>
+                <p className="mt-2 text-lg font-black text-gray-900 dark:text-white">{trainingStateLabel}</p>
+                <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
+                  {trainingStatusMessage}
+                </p>
+              </div>
+            </div>
+          </div>
+        </main>
       </div>
     );
   }
@@ -884,7 +1102,7 @@ function Prediction() {
                   <p className="text-xs font-bold uppercase text-gray-500 dark:text-gray-400">Status</p>
                   <p className="mt-2 text-lg font-black text-gray-900 dark:text-white">{trainingStateLabel}</p>
                   <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
-                    {activeModelStatus.message || 'Training is running in the background.'}
+                    {trainingStatusMessage}
                   </p>
                 </div>
               </div>
@@ -1029,8 +1247,8 @@ function Prediction() {
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 sm:gap-7">
             {/* Left Column - Charts */}
             <div className="lg:col-span-2 space-y-5 sm:space-y-7">
-              {/* Professional Stock Price Prediction Chart */}
-              <div className="bg-gradient-to-br from-white to-gray-50 dark:from-gray-800 dark:to-gray-900 rounded-2xl shadow-xl p-5 sm:p-7 border border-gray-200 dark:border-gray-700 hover:shadow-2xl transition-all duration-300 overflow-hidden">
+              {/* Legacy line forecast chart hidden so the bounded candlestick chart is the primary price view. */}
+              <div className="hidden">
                 <div className="flex items-center justify-between mb-3 sm:mb-4 flex-wrap gap-2">
                   <h3 className="text-base sm:text-lg lg:text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
                     <BarChart3 className="w-4 h-4 sm:w-5 sm:h-5 text-cyan-600 dark:text-cyan-400" />
@@ -1162,8 +1380,21 @@ function Prediction() {
                 </div>
               </div>
 
-              {/* Technical Chart - Professional Candlestick */}
-              <div className="bg-gradient-to-br from-white to-gray-50 dark:from-gray-800 dark:to-gray-900 rounded-2xl shadow-xl p-5 sm:p-7 border border-gray-200 dark:border-gray-700 hover:shadow-2xl transition-all duration-300 overflow-hidden">
+              <div className="bg-white dark:bg-gray-900 rounded-xl sm:rounded-2xl shadow-lg p-4 sm:p-5 border border-gray-200 dark:border-gray-700 overflow-hidden">
+                <h3 className="text-base sm:text-lg font-bold text-gray-900 dark:text-white mb-3 flex items-center gap-2">
+                  <TrendingUp className="w-4 h-4 sm:w-5 sm:h-5 text-cyan-600 dark:text-cyan-400" />
+                  <span>Price Chart</span>
+                </h3>
+                <TradingViewStyleChart
+                  candles={stockData.technical_chart?.candles || []}
+                  sma20={stockData.technical_chart?.moving_averages?.sma20 || []}
+                  predictions={stockData.future_predictions || []}
+                  isProfit={stockData.is_profit}
+                />
+              </div>
+
+              {/* Legacy Recharts candlestick kept out of view; custom chart above clips candles correctly. */}
+              <div className="hidden">
                 <h3 className="text-base sm:text-lg lg:text-xl font-bold text-gray-900 dark:text-white mb-3 sm:mb-4 flex items-center gap-2">
                   <TrendingUp className="w-4 h-4 sm:w-5 sm:h-5 text-cyan-600 dark:text-cyan-400" />
                   <span>Historical & Predicted Price</span>
