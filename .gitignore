@@ -71,4 +71,3 @@ backend/unified_engine/models/
 backend/unified_engine/training_results.json
 backend/unified_engine/_prediction_logs/
 backend/v36_training_results.json
-backend/charts/
