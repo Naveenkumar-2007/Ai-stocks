@@ -10,7 +10,6 @@ app_port: 7860
 
 # 📈 AI Stock Predictor & Quantitative MLOps Platform
 
-![AI Pipeline Architecture](assets/ai_pipeline.png)
 
 ![GitHub License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Python Version](https://img.shields.io/badge/python-3.10%2B-blue)
@@ -58,119 +57,105 @@ Every tool in this repository was carefully selected to replicate a professional
 
 ---
 
-## 🏗️ System Architecture
+## System Architecture
 
-The architecture is highly decoupled, ensuring the React frontend remains lightning-fast while heavy tensor computations occur asynchronously.
+The current deployment uses Flask as the runtime control plane, the Ultimate Engine v3.6 as the primary prediction engine, MLflow/DagsHub as the remote model registry, and a background scheduler for fresh training. Airflow and DVC are still available for offline orchestration, but live prediction requests do not depend on them.
 
-### Core System Flow
+### Current Runtime Flow
 
 ```mermaid
 graph TD
-    %% Tool Colors
-    classDef react fill:#61DAFB,stroke:#333,stroke-width:2px,color:#000,font-weight:bold;
-    classDef firebase fill:#FFCA28,stroke:#333,stroke-width:2px,color:#000,font-weight:bold;
-    classDef flask fill:#FFFFFF,stroke:#333,stroke-width:2px,color:#000,font-weight:bold;
-    classDef fastapi fill:#009688,stroke:#333,stroke-width:2px,color:#fff,font-weight:bold;
-    classDef tensorflow fill:#FF6F00,stroke:#333,stroke-width:2px,color:#fff,font-weight:bold;
-    classDef mlflow fill:#0194E2,stroke:#333,stroke-width:2px,color:#fff,font-weight:bold;
-    classDef dvc fill:#945DD6,stroke:#333,stroke-width:2px,color:#fff,font-weight:bold;
-    classDef airflow fill:#017CEE,stroke:#333,stroke-width:2px,color:#fff,font-weight:bold;
-    classDef grafana fill:#F46800,stroke:#333,stroke-width:2px,color:#fff,font-weight:bold;
-    classDef groq fill:#F55036,stroke:#333,stroke-width:2px,color:#fff,font-weight:bold;
-    classDef db fill:#333333,stroke:#00B8FF,stroke-width:2px,color:#fff,font-weight:bold;
-    classDef logo fill:none,stroke:none,color:#fff,font-weight:bold,font-size:16px;
-
-    subgraph ClientLayer ["1. Client Layer"]
-        A["<img src='https://upload.wikimedia.org/wikipedia/commons/a/a7/React-icon.svg' width='20'/> React.js Frontend"]:::react
-        B["<img src='https://upload.wikimedia.org/wikipedia/commons/3/37/Firebase_Logo.svg' width='20'/> Firebase Auth"]:::firebase
+    subgraph Client ["Client Experience"]
+        React["React Frontend"]
+        Auth["Firebase Auth"]
+        ChatUI["Chat UI"]
     end
 
-    subgraph APILayer ["2. API Services (Dockerized)"]
-        C["<img src='https://upload.wikimedia.org/wikipedia/commons/c/c3/Python-logo-notext.svg' width='20'/> Flask Backend API"]:::flask
-        D["<img src='https://fastapi.tiangolo.com/img/logo-margin/logo-teal.png' width='20'/> FastAPI Chatbot"]:::fastapi
+    subgraph Runtime ["Hugging Face Space Runtime"]
+        Flask["Flask API<br/>backend/app.py"]
+        Admin["Admin API<br/>reset, train all, force retrain"]
+        Chatbot["FastAPI Chatbot<br/>port 8001"]
+        Scheduler["Background Scheduler<br/>22:30 UTC weekdays + startup catch-up"]
     end
 
-    subgraph MLOpsLayer ["3. Data & MLOps Pipeline"]
-        E["<img src='https://upload.wikimedia.org/wikipedia/commons/d/de/AirflowLogo.png' width='20'/> Apache Airflow"]:::airflow
-        E2["DVC Orchestrator"]:::dvc
-        F["<img src='https://upload.wikimedia.org/wikipedia/commons/2/2d/Tensorflow_logo.svg' width='20'/> TensorFlow LSTM Models"]:::tensorflow
-        G["<img src='https://upload.wikimedia.org/wikipedia/commons/f/fe/Mlflow-logo.svg' width='20'/> MLflow Registry"]:::mlflow
-        H[("Local Model Storage")]:::db
+    subgraph Data ["Market Data"]
+        Twelve["Twelve Data OHLCV"]
+        Finnhub["Finnhub profile, quote, news, sentiment"]
+        Cache["Local cache<br/>API safety and fast reloads"]
     end
 
-    subgraph RAGLayer ["4. AI RAG Chatbot"]
-        I[("FAISS Vector Database")]:::db
-        J["LangChain Engine"]:::fastapi
-        K["Groq Llama 3 LLM"]:::groq
-    end
-    
-    subgraph MonitoringLayer ["5. Monitoring"]
-        N["<img src='https://upload.wikimedia.org/wikipedia/commons/a/a1/Grafana_logo.svg' width='20'/> Grafana Dashboards"]:::grafana
+    subgraph Prediction ["Prediction Engines"]
+        Ultimate["Ultimate Engine v3.6<br/>regime-aware ensemble, 5-day direction horizon"]
+        LSTM["Legacy LSTM fallback<br/>per-ticker MLflow/local registry"]
+        Technical["Technical-analysis fallback<br/>used while training is missing"]
     end
 
-    subgraph ExternalLayer ["6. External Financial Data"]
-        L["TwelveData API"]:::db
-        M["Finnhub API"]:::db
+    subgraph MLOps ["Model State and Observability"]
+        Stocks["mlops/stocks.json<br/>active training universe"]
+        MLflow["MLflow/DagsHub Registry<br/>LSTM_* registered models"]
+        RuntimeArtifacts["Runtime artifacts<br/>models, metrics, charts"]
+        Prom["Prometheus metrics"]
+        Grafana["Grafana Cloud dashboards"]
     end
 
-    %% Logo at the bottom
-    LOGO["<img src='https://raw.githubusercontent.com/Naveenkumar-2007/Ai-stocks/main/frontend/public/assets/logo-dark.jpg' width='140'/><br/>AI Stock Predictor & Quantitative MLOps Platform"]:::logo
-
-    %% Wiring
-    A <-->|Auth Token| B
-    A -->|Fetch Stock Predictions| C
-    A -->|Chat with AI| D
-
-    C <-->|Get Live Prices| L
-    C <-->|Get Live News| M
-    C -->|Load Best Model| H
-    C -->|Emit Metrics| N
-
-    D <-->|Fetch Live Context| M
-    D <-->|Semantic Search| I
-    D -->|Build Prompt| J
-    J <-->|Stream Response| K
-
-    E -->|Schedules| E2
-    E2 -->|Trigger Daily Training| F
-    F -->|Log Accuracy Metrics| G
-    F -->|Save .keras files| H
-    
-    ExternalLayer ~~~ LOGO
+    React -->|prediction request| Flask
+    React <-->|login/session| Auth
+    ChatUI --> Chatbot
+    Flask --> Cache
+    Flask --> Twelve
+    Flask --> Finnhub
+    Chatbot --> Finnhub
+    Flask -->|primary| Ultimate
+    Flask -->|fallback| LSTM
+    Flask -->|no trained model yet| Technical
+    Flask -->|register searched ticker| Stocks
+    Scheduler -->|reload active universe| Stocks
+    Scheduler -->|scheduled retrain| Ultimate
+    Scheduler -->|legacy retrain/registration| LSTM
+    LSTM --> MLflow
+    Ultimate --> RuntimeArtifacts
+    Admin --> MLflow
+    Admin --> RuntimeArtifacts
+    Flask --> Prom
+    Prom --> Grafana
 ```
 
 ---
 
-## 🤖 Automated MLOps & Drift Detection (V2 Pipeline)
+## Automated MLOps & Drift Detection (Current Pipeline)
 
-To protect the system from market regime changes (like sudden crashes or sector rotations), the V2 pipeline implements an enterprise-grade **Continuous Training (CT)** loop using statistical drift detection. This ensures we only spend compute resources retraining models when the market behavior actually changes.
+The live pipeline now prioritizes clean runtime training and registry hygiene. User-searched tickers are added to `stocks.json`, the scheduler retrains that active universe, and the admin reset endpoint can clear old runtime artifacts plus old MLflow registered models before a fresh training cycle. Drift detection remains part of `mlops_v2`, but it is a supporting signal rather than the only serving path.
 
 ```mermaid
 graph TD
-    %% Advanced Styling
-    classDef scheduler fill:#9C27B0,stroke:#fff,stroke-width:2px,color:#fff,font-weight:bold;
-    classDef data fill:#00BCD4,stroke:#fff,stroke-width:2px,color:#000,font-weight:bold;
-    classDef model fill:#FF9800,stroke:#fff,stroke-width:2px,color:#000,font-weight:bold;
-    classDef monitor fill:#F44336,stroke:#fff,stroke-width:2px,color:#fff,font-weight:bold;
-    classDef registry fill:#03A9F4,stroke:#fff,stroke-width:2px,color:#000,font-weight:bold;
-    classDef success fill:#4CAF50,stroke:#fff,stroke-width:2px,color:#fff,font-weight:bold;
+    Search["User searches ticker"]
+    Register["Normalize ticker and save to stocks.json"]
+    Predict{"Trained model exists?"}
+    ServeUltimate["Serve Ultimate Engine v3.6 prediction"]
+    ServeFallback["Serve technical fallback immediately"]
+    Background["Start background catch-up training"]
+    Schedule["Weekday scheduler<br/>22:30 UTC"]
+    Fetch["Fetch OHLCV, quote, news, sentiment"]
+    TrainUltimate["Train regime-aware ensemble<br/>direction, risk, return"]
+    TrainLSTM["Train/register LSTM fallback<br/>MLflow LSTM_* model"]
+    Promote["Promote usable artifacts<br/>runtime model paths + MLflow registry"]
+    Monitor["Emit accuracy, PnL, drift, latency metrics"]
+    Reset["Admin reset<br/>delete runtime artifacts + LSTM_* registered models"]
 
-    S["🕒 Airflow Background Scheduler"]:::scheduler
-    D["📊 Data Ingestion Engine<br/>(TwelveData & Finnhub)"]:::data
-    M["🧠 Production LSTM/XGBoost Model"]:::model
-    E{"🕵️ Statistical Drift Monitor<br/>(KS-Test & PSI)"}:::monitor
-    ML["📦 MLflow Model Registry"]:::registry
-    
-    S -->|Triggers Daily Job at 4:00 AM| D
-    D -->|Fetches Latest Validation Data| M
-    M -->|Predicts on New Data| E
-    
-    E -->|Drift Score > Threshold| Alert["⚠️ Model Decay Detected!"]:::monitor
-    E -->|Drift Score < Safe| OK["✅ Model is Healthy<br/>Skip Retraining"]:::success
-    
-    Alert -->|Pull 730+ Days History| D2["📚 Deep Retraining Initiated"]:::data
-    D2 -->|Train Champion Model| M2["⚙️ Train New LSTM"]:::model
-    M2 -->|Register & Tag 'Production'| ML
+    Search --> Register
+    Register --> Predict
+    Predict -->|yes| ServeUltimate
+    Predict -->|no| ServeFallback
+    ServeFallback --> Background
+    Schedule --> Fetch
+    Background --> Fetch
+    Fetch --> TrainUltimate
+    Fetch --> TrainLSTM
+    TrainUltimate --> Promote
+    TrainLSTM --> Promote
+    Promote --> ServeUltimate
+    ServeUltimate --> Monitor
+    Reset --> Register
 ```
 
 ---
@@ -210,16 +195,6 @@ Generated metrics JSON, registry metadata, and binary model files such as `model
 ### Understanding the Predictive Edge:
 - **XGBoost Directional Accuracy (Cyan)**: This represents the model's ability to correctly predict the absolute direction of the market (Up vs. Down) over the validation horizon. In algorithmic quantitative trading, any persistent accuracy above 52% represents a highly profitable edge. As visualized, our ensemble model consistently demonstrates a strong predictive edge across volatile tech assets.
 - **Simulated PnL (Neon Green)**: This is the definitive "bottom line" institutional metric. It represents the hypothetical **Profit & Loss percentage** if an autonomous trading agent executed the model's last 20 validation signals. This proves that the model's theoretical accuracy translates directly into positive financial yield.
-
-### Advanced Feature Analytics: Risk & Magnitude
-
-The Dual AI Engine doesn't just predict direction; it correlates accuracy with institutional risk metrics and magnitude forecasting.
-
-![Sharpe Ratio vs Accuracy](assets/sharpe_accuracy_scatter.png)
-*The scatter plot above correlates the XGBoost Directional Accuracy against the Simulated Sharpe Ratio. Notice the exponential yield trendline: as the model's accuracy breaches the 50% threshold, the risk-adjusted returns (Sharpe Ratio) compound significantly.*
-
-![LSTM Error Margins](assets/lstm_error_margins.png)
-*The bar chart visualizes the LSTM neural network's price forecasting error margins (Normalized MAE & RMSE). A tight convergence between MAE and RMSE indicates the LSTM model is extremely resilient against outlier market shocks and accurately predicts the true trajectory.*
 
 ---
 
@@ -280,6 +255,4 @@ docker-compose up -d
 ## 🤝 Contributing
 Contributions are welcome! If you'd like to improve the AI ensemble strategies, add new technical indicators, or enhance the React UI, feel free to open a Pull Request.
 
-| **AMZN** | `42.5%` | `0.0662` | `+82.56%` | `10.36` | `8 / 8 Passed` |
-
-> *Note: Simulated PnL and Sharpe Ratios are theoretical backtest metrics generated by the V2 Pipeline and do not constitute financial advice.*
+> *Note: Simulated PnL and Sharpe Ratios are theoretical backtest metrics generated by the current training pipeline and do not constitute financial advice.*
