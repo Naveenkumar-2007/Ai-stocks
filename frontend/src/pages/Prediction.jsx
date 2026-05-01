@@ -433,7 +433,7 @@ function Prediction() {
 
     try {
       const [stockRes, sentimentRes, newsRes] = await Promise.all([
-        axios.get(`${API_BASE}/api/stock/${symbol}?days=${days}`, { headers, timeout: 45000 }),
+        axios.get(`${API_BASE}/api/stock/${symbol}?days=${days}`, { headers, timeout: 120000 }),
         axios.get(`${API_BASE}/api/sentiment/${symbol}`, { timeout: 15000 }).catch(() => ({ data: { sentiment: null } })),
         axios.get(`${API_BASE}/api/news/${symbol}?days=7`, { timeout: 15000 }).catch(() => ({ data: { news: [] } }))
       ]);
@@ -472,7 +472,7 @@ function Prediction() {
         trackUserStats(currentUser.email, payload?.ticker || symbol);
       }
     } catch (err) {
-      setError(err.response?.data?.error || (err.request ? 'Backend unreachable or request timed out. Please try again in a few seconds.' : 'Failed to fetch data'));
+      setError(err.response?.data?.error || (err.request ? 'The server is still preparing market data for this symbol. Please try again in a few seconds.' : 'Failed to fetch data'));
       console.error(err);
     } finally {
       setLoading(false);

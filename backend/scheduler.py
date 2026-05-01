@@ -41,7 +41,9 @@ class ModelTrainingScheduler:
         # Match Airflow DAG default schedule: 22:30 UTC on weekdays.
         self.training_time_utc = os.getenv('DAILY_TRAIN_TIME_UTC', '22:30')
         self.weekdays_only = os.getenv('TRAIN_WEEKDAYS_ONLY', 'true').strip().lower() in ('1', 'true', 'yes', 'on')
-        self.enable_startup_catchup = os.getenv('ENABLE_STARTUP_CATCHUP', 'true').strip().lower() in ('1', 'true', 'yes', 'on')
+        # Keep deployment cold starts responsive. Scheduled training still runs
+        # normally; startup catch-up can be re-enabled with ENABLE_STARTUP_CATCHUP=true.
+        self.enable_startup_catchup = os.getenv('ENABLE_STARTUP_CATCHUP', 'false').strip().lower() in ('1', 'true', 'yes', 'on')
         from mlops.config import MLOpsConfig
         self.stocks = MLOpsConfig.get_stocks()
 

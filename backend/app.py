@@ -78,6 +78,8 @@ _ultimate_prediction_cache = {}
 _model_metadata = {}
 _training_in_progress = set()
 _training_state_lock = threading.Lock()
+_ultimate_training_in_progress = set()
+_ultimate_training_state_lock = threading.Lock()
 
 SUFFIX_EXCHANGE_COUNTRY = {
     '.NS': ('NSE', 'India'),
@@ -1539,6 +1541,34 @@ def predict_multi_day_lstm(hist, current_price, days, ticker):
     import ta as ta_lib
     
     predictions = []
+
+    def trigger_background_ultimate_training():
+        ticker_key = ticker.upper()
+        with _ultimate_training_state_lock:
+            should_start_training = ticker_key not in _ultimate_training_in_progress
+            if should_start_training:
+                _ultimate_training_in_progress.add(ticker_key)
+
+        if not should_start_training:
+            print(f"v3.6 training already in progress for {ticker_key}.")
+            return
+
+        def background_train():
+            try:
+                print(f"Background v3.6 training started for {ticker_key}")
+                from ultimate_stock_engine_v36 import train_ultimate_model
+                train_result = train_ultimate_model(ticker_key, use_regime=True, generate_charts=True)
+                if train_result:
+                    print(f"Background v3.6 training completed for {ticker_key}")
+                else:
+                    print(f"Background v3.6 training returned no artifact for {ticker_key}")
+            except Exception as train_err:
+                print(f"Background v3.6 training failed for {ticker_key}: {train_err}")
+            finally:
+                with _ultimate_training_state_lock:
+                    _ultimate_training_in_progress.discard(ticker_key)
+
+        threading.Thread(target=background_train, daemon=True).start()
     
     try:
         _ultimate_prediction_cache.pop(ticker.upper(), None)
@@ -1548,7 +1578,7 @@ def predict_multi_day_lstm(hist, current_price, days, ticker):
         # 4-model ensemble + regime detection + calibrated predictions
         # =====================================================================
         try:
-            from ultimate_stock_engine_v36 import predict_ultimate_realtime, load_ultimate_model, train_ultimate_model
+            from ultimate_stock_engine_v36 import predict_ultimate_realtime
             ultimate_payload = predict_ultimate_realtime(ticker, hist, current_price=current_price, days=days)
             if ultimate_payload and ultimate_payload.get('predicted_prices'):
                 _ultimate_prediction_cache[ticker.upper()] = ultimate_payload
@@ -1572,34 +1602,10 @@ def predict_multi_day_lstm(hist, current_price, days, ticker):
                     
                 return ultimate_payload['predicted_prices']
             else:
-                # No trained model exists — trigger on-demand v3.6 training
-                print(f"⚠️ No v3.6 model for {ticker}. Triggering on-demand training...")
-                try:
-                    train_result = train_ultimate_model(ticker, use_regime=True, generate_charts=True)
-                    if train_result:
-                        # Retry prediction after training
-                        ultimate_payload = predict_ultimate_realtime(ticker, hist, current_price=current_price, days=days)
-                        if ultimate_payload and ultimate_payload.get('predicted_prices'):
-                            _ultimate_prediction_cache[ticker.upper()] = ultimate_payload
-                            print(f"✅ v3.6 on-demand prediction for {ticker}: signal={ultimate_payload.get('signal')}")
-                            
-                            # Update Prometheus metrics for Grafana
-                            try:
-                                from mlops_v2.monitoring import set_accuracy_20d, set_simulated_pnl, set_sharpe_ratio, inc_prediction
-                                metrics = ultimate_payload.get('metrics', {})
-                                if 'accuracy' in metrics:
-                                    set_accuracy_20d(ticker.upper(), metrics['accuracy'])
-                                if 'total_return' in metrics:
-                                    set_simulated_pnl(ticker.upper(), metrics['total_return'])
-                                if 'sharpe_ratio' in metrics:
-                                    set_sharpe_ratio(ticker.upper(), metrics['sharpe_ratio'])
-                                inc_prediction(ticker.upper())
-                            except Exception as metric_err:
-                                print(f"⚠️ Prometheus metrics update failed for {ticker}: {metric_err}")
-                                
-                            return ultimate_payload['predicted_prices']
-                except Exception as train_err:
-                    print(f"⚠️ On-demand v3.6 training failed for {ticker}: {train_err}")
+                # No trained model exists. Train in the background so the API can
+                # still return market data before frontend/proxy timeouts fire.
+                print(f"No v3.6 model for {ticker}. Triggering background training...")
+                trigger_background_ultimate_training()
         except Exception as ultimate_err:
             print(f"Ultimate Engine v3.6 unavailable for {ticker}: {ultimate_err}")
 
