@@ -16,9 +16,12 @@ venv/
 mlruns/
 .mlflow/
 backend/mlflow.db
+backend/ai_stocks.db
 backend/mlruns/
 backend/logs/
 backend/cache/
+backend/artifacts/
+backend/charts/
 backend/monitoring/reports/
 backend/monitoring/tuning/
 backend/data/raw/
@@ -31,7 +34,14 @@ backend/airflow/airflow.db
 backend/airflow/__pycache__/
 backend/mlops_v2/models/
 backend/mlops_v2/__pycache__/
+backend/mlops/metrics/
+backend/mlops/ultimate_engine/
 backend/mlops/ultimate_engine/**/model.joblib
+backend/mlops/model_registry/model_store/
+backend/mlops/model_registry/global_features.json
+backend/mlops/model_registry/global_scalers.pkl
+backend/chatbot/app/mlops/model_registry/
+mlops/model_registry/
 mlops/checkpoints/
 mlops/logs/
 cache/
@@ -51,15 +61,9 @@ frontend/.env.local
 *.swp
 *.swo
 *~
-# Models (Keep ONLY these for production)
-!backend/artifacts/
-!backend/artifacts/*.h5
-!backend/artifacts/*.pkl
-!backend/mlops/model_registry/
-!backend/mlops/model_registry/metadata.json
-!backend/mlops/model_registry/model_store/
-!backend/mlops/model_registry/model_store/**/model.h5
-!backend/mlops/model_registry/model_store/**/scaler.pkl
+# Models are generated at runtime and should not be committed.
 *.keras
+*.h5
+*.pkl
 # Chat Storage
 backend/chatbot/app/chat_storage/*.json

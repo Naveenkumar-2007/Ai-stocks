@@ -141,7 +141,7 @@ Stage: train_all (backend/dvc.yaml)
 - evaluation metrics
 - local model registry save
 - MLflow run logging and optional model registration
-4. Aggregated metrics are written to:
+4. Aggregated metrics are written at runtime and ignored by Git:
 - backend/mlops/metrics/summary.json
 - backend/mlops/metrics/all_stocks_metrics.json
 
