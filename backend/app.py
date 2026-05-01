@@ -1017,6 +1017,20 @@ def get_stock_data(ticker):
             if isinstance(quote_previous, (int, float)) and quote_previous > 0:
                 previous_close = float(quote_previous)
 
+        day_high = None
+        day_low = None
+        if quote_data:
+            quote_high = quote_data.get('high')
+            quote_low = quote_data.get('low')
+            if isinstance(quote_high, (int, float)) and quote_high > 0:
+                day_high = float(quote_high)
+            if isinstance(quote_low, (int, float)) and quote_low > 0:
+                day_low = float(quote_low)
+        if day_high is None and 'High' in hist.columns:
+            day_high = float(hist['High'].iloc[-1])
+        if day_low is None and 'Low' in hist.columns:
+            day_low = float(hist['Low'].iloc[-1])
+
         day_change = current_price - previous_close
         day_change_percent = (day_change / previous_close) * 100 if previous_close else 0
 
@@ -1344,6 +1358,8 @@ def get_stock_data(ticker):
             'ai_signal': ai_signal,
             'day_change': safe_float(day_change),
             'day_change_percent': safe_float(day_change_percent),
+            'day_high': safe_float(day_high),
+            'day_low': safe_float(day_low),
             'volume': volume,
             'predicted_volume': predicted_volumes,
             'is_training': len(predictions) == 0,

@@ -16,6 +16,7 @@ venv/
 mlruns/
 .mlflow/
 backend/mlflow.db
+ai_stocks.db
 backend/ai_stocks.db
 backend/mlruns/
 backend/logs/
@@ -71,3 +72,6 @@ backend/unified_engine/models/
 backend/unified_engine/training_results.json
 backend/unified_engine/_prediction_logs/
 backend/v36_training_results.json
+backend/local_custom_training_results.json
+backend/train_local_custom.py
+backend/charts/*.png

@@ -45,7 +45,7 @@ class KeyRotator:
         self.name = name
         self.keys = [k.strip() for k in keys if k.strip()]
         if not self.keys:
-            raise RuntimeError(f"No API keys configured for {name}. Update your .env file.")
+            logger.warning("%s: no API keys configured; provider calls will fail until keys are set", name)
         self._idx = 0
         self._lock = threading.Lock()
         logger.info(f"ðŸ”‘ {name}: loaded {len(self.keys)} API key(s)")
@@ -54,11 +54,15 @@ class KeyRotator:
     def key(self) -> str:
         """Return the currently active key."""
         with self._lock:
+            if not self.keys:
+                raise RuntimeError(f"No API keys configured for {self.name}. Update your .env file.")
             return self.keys[self._idx % len(self.keys)]
 
     def rotate(self, failed_key: str = None) -> str:
         """Move to next key and return it. Only rotates if the caller's key is still active."""
         with self._lock:
+            if not self.keys:
+                raise RuntimeError(f"No API keys configured for {self.name}. Update your .env file.")
             if failed_key and self.keys[self._idx % len(self.keys)] != failed_key:
                 return self.keys[self._idx % len(self.keys)]  # already rotated
             self._idx += 1
@@ -86,9 +90,9 @@ alpha_keys = _load_keys('ALPHA_VANTAGE_API_KEYS', 'ALPHA_VANTAGE_API_KEY')
 alpha_vantage_rotator = KeyRotator('AlphaVantage', alpha_keys) if alpha_keys else None
 
 # Backward-compatible variable names (used throughout the file)
-TWELVE_DATA_API_KEY = twelve_data_rotator.key
+TWELVE_DATA_API_KEY = twelve_data_rotator.key if len(twelve_data_rotator) else ''
 BASE_URL = 'https://api.twelvedata.com'
-FINNHUB_API_KEY = finnhub_rotator.key
+FINNHUB_API_KEY = finnhub_rotator.key if len(finnhub_rotator) else ''
 FINNHUB_BASE_URL = 'https://finnhub.io/api/v1'
 ALPHA_VANTAGE_API_KEY = alpha_vantage_rotator.key if alpha_vantage_rotator else os.getenv('ALPHA_VANTAGE_API_KEY', '')
 
@@ -146,10 +150,10 @@ DEFAULT_SUFFIX_FALLBACKS = ['.NS', '.BO', '.L', '.HK', '.TO']
 
 #  Dynamic key getters (always return the currently active key) 
 def _get_twelve_key():
-    return twelve_data_rotator.key
+    return twelve_data_rotator.key if len(twelve_data_rotator) else ''
 
 def _get_finnhub_key():
-    return finnhub_rotator.key
+    return finnhub_rotator.key if len(finnhub_rotator) else ''
 
 def _get_alpha_key():
     return alpha_vantage_rotator.key if alpha_vantage_rotator else ALPHA_VANTAGE_API_KEY
@@ -162,6 +166,10 @@ def _request_with_rotation(rotator, url, params, apikey_param='apikey', timeout=
     Returns the requests.Response object on success.
     """
     attempts = len(rotator)
+    if attempts == 0:
+        raise requests.exceptions.RequestException(
+            f"{rotator.name}: no API keys configured. Update your environment secrets."
+        )
     last_error = None
 
     for attempt in range(attempts):

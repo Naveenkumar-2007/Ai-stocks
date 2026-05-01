@@ -56,3 +56,4 @@ protobuf>=4.25.3,<5
 # Database
 SQLAlchemy>=1.4.36,<2.0.0
 psutil>=5.9.0
+scipy>=1.10.0
