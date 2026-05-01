@@ -248,14 +248,17 @@ const parseDateLocal = (dateStr) => {
 };
 
 const TradingViewStyleChart = ({ candles = [], sma20 = [], predictions = [], isProfit }) => {
-  const width = 960;
+  const [hoverIndex, setHoverIndex] = useState(null);
+  const width = 980;
   const height = 430;
-  const pad = { top: 24, right: 78, bottom: 58, left: 58 };
-  const volumeHeight = 72;
-  const priceBottom = height - pad.bottom - volumeHeight;
+  const pad = { top: 26, right: 82, bottom: 54, left: 58 };
+  const volumeHeight = 78;
+  const volumeGap = 18;
+  const priceBottom = height - pad.bottom - volumeHeight - volumeGap;
+  const volumeTop = priceBottom + volumeGap;
   const priceHeight = priceBottom - pad.top;
   const plotWidth = width - pad.left - pad.right;
-  const visibleCandles = candles.slice(-42).filter((candle) =>
+  const visibleCandles = candles.slice(-46).filter((candle) =>
     Number.isFinite(Number(candle.open)) &&
     Number.isFinite(Number(candle.high)) &&
     Number.isFinite(Number(candle.low)) &&
@@ -270,7 +273,7 @@ const TradingViewStyleChart = ({ candles = [], sma20 = [], predictions = [], isP
     );
   }
 
-  const futurePoints = predictions.slice(0, 8).filter((point) => Number.isFinite(Number(point.price)));
+  const futurePoints = predictions.slice(0, 6).filter((point) => Number.isFinite(Number(point.price)));
   const smaByDate = new Map((sma20 || []).map((point) => [point.date, Number(point.value)]));
   const priceValues = visibleCandles.flatMap((candle) => [
     Number(candle.open),
@@ -286,14 +289,14 @@ const TradingViewStyleChart = ({ candles = [], sma20 = [], predictions = [], isP
 
   const minPrice = Math.min(...priceValues);
   const maxPrice = Math.max(...priceValues);
-  const pricePadding = Math.max((maxPrice - minPrice) * 0.14, maxPrice * 0.004, 0.5);
+  const pricePadding = Math.max((maxPrice - minPrice) * 0.18, maxPrice * 0.004, 0.5);
   const lowBound = minPrice - pricePadding;
   const highBound = maxPrice + pricePadding;
   const priceRange = highBound - lowBound || 1;
   const maxVolume = Math.max(...visibleCandles.map((candle) => Number(candle.volume) || 0), 1);
   const pointCount = visibleCandles.length + futurePoints.length;
   const step = plotWidth / Math.max(pointCount - 1, 1);
-  const candleWidth = Math.max(5, Math.min(12, step * 0.58));
+  const candleWidth = Math.max(5, Math.min(11, step * 0.56));
 
   const xForIndex = (index) => pad.left + index * step;
   const yForPrice = (price) => pad.top + ((highBound - Number(price)) / priceRange) * priceHeight;
@@ -304,6 +307,20 @@ const TradingViewStyleChart = ({ candles = [], sma20 = [], predictions = [], isP
   const formatPrice = (value) => `$${Number(value).toFixed(2)}`;
   const formatDate = (date) => parseDateLocal(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   const gridPrices = Array.from({ length: 5 }, (_, index) => lowBound + (priceRange * index) / 4).reverse();
+  const hoveredCandle = Number.isInteger(hoverIndex) ? visibleCandles[hoverIndex] : null;
+  const hoverX = hoveredCandle ? xForIndex(hoverIndex) : null;
+  const hoverY = hoveredCandle ? yForPrice(hoveredCandle.close) : null;
+  const hoverRising = hoveredCandle ? Number(hoveredCandle.close) >= Number(hoveredCandle.open) : false;
+  const hoverColor = hoverRising ? '#00b386' : '#ff4d4f';
+
+  const updateHoverFromPointer = (event) => {
+    const svg = event.currentTarget;
+    const clientX = event.touches?.[0]?.clientX ?? event.clientX;
+    const rect = svg.getBoundingClientRect();
+    const viewX = ((clientX - rect.left) / rect.width) * width;
+    const index = Math.round((viewX - pad.left) / step);
+    setHoverIndex(Math.max(0, Math.min(visibleCandles.length - 1, index)));
+  };
 
   let hasSmaStart = false;
   const smaPath = visibleCandles
@@ -327,22 +344,40 @@ const TradingViewStyleChart = ({ candles = [], sma20 = [], predictions = [], isP
     : '';
 
   return (
-    <div className="w-full overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#0b1220]">
-      <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-[330px] sm:h-[390px] lg:h-[420px]" role="img" aria-label="Stock candlestick chart">
+    <div className="w-full overflow-hidden rounded-lg border border-slate-700/70 bg-[#0b1220] shadow-inner">
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        className="w-full h-[330px] sm:h-[390px] lg:h-[420px] touch-none select-none"
+        role="img"
+        aria-label="Interactive stock candlestick chart"
+        onMouseMove={updateHoverFromPointer}
+        onMouseLeave={() => setHoverIndex(null)}
+        onTouchStart={updateHoverFromPointer}
+        onTouchMove={updateHoverFromPointer}
+      >
         <defs>
           <clipPath id="pricePlotClip">
             <rect x={pad.left} y={pad.top} width={plotWidth} height={priceHeight} />
           </clipPath>
+          <clipPath id="volumePlotClip">
+            <rect x={pad.left} y={volumeTop} width={plotWidth} height={volumeHeight} />
+          </clipPath>
         </defs>
-        <rect x="0" y="0" width={width} height={height} fill="currentColor" className="text-white dark:text-[#0b1220]" />
+        <rect x="0" y="0" width={width} height={height} fill="#0b1220" />
+        <rect x={pad.left} y={pad.top} width={plotWidth} height={priceHeight + volumeGap + volumeHeight} fill="#0f172a" opacity="0.62" rx="10" />
         {gridPrices.map((price) => {
           const y = yForPrice(price);
           return (
             <g key={`grid-${price}`}>
-              <line x1={pad.left} x2={width - pad.right} y1={y} y2={y} stroke="#94a3b8" strokeOpacity="0.2" strokeDasharray="4 6" />
+              <line x1={pad.left} x2={width - pad.right} y1={y} y2={y} stroke="#94a3b8" strokeOpacity="0.18" strokeDasharray="4 7" />
               <text x={width - pad.right + 10} y={y + 4} fill="#94a3b8" fontSize="12" fontWeight="600">{formatPrice(price)}</text>
             </g>
           );
+        })}
+        {visibleCandles.map((candle, index) => {
+          if (index % Math.ceil(visibleCandles.length / 8) !== 0) return null;
+          const x = xForIndex(index);
+          return <line key={`vgrid-${candle.date}`} x1={x} x2={x} y1={pad.top} y2={height - pad.bottom} stroke="#94a3b8" strokeOpacity="0.08" />;
         })}
         <line x1={pad.left} x2={width - pad.right} y1={priceBottom} y2={priceBottom} stroke="#94a3b8" strokeOpacity="0.35" />
 
@@ -364,7 +399,6 @@ const TradingViewStyleChart = ({ candles = [], sma20 = [], predictions = [], isP
 
             return (
               <g key={candle.date}>
-                <title>{`${formatDate(candle.date)} O ${formatPrice(open)} H ${formatPrice(high)} L ${formatPrice(low)} C ${formatPrice(close)} Vol ${formatVolume(candle.volume)}`}</title>
                 <line x1={x} x2={x} y1={yHigh} y2={yLow} stroke={color} strokeWidth="1.5" strokeLinecap="round" />
                 <rect
                   x={x - candleWidth / 2}
@@ -383,23 +417,25 @@ const TradingViewStyleChart = ({ candles = [], sma20 = [], predictions = [], isP
           {predictionPath && <path d={predictionPath} fill="none" stroke={isProfit ? '#10b981' : '#ef4444'} strokeWidth="2.8" strokeDasharray="7 6" strokeLinecap="round" strokeLinejoin="round" />}
         </g>
 
-        {visibleCandles.map((candle, index) => {
-          const x = xForIndex(index);
-          const volY = yForVolume(candle.volume);
-          const rising = Number(candle.close) >= Number(candle.open);
-          return (
-            <rect
-              key={`volume-${candle.date}`}
-              x={x - candleWidth / 2}
-              y={volY}
-              width={candleWidth}
-              height={height - pad.bottom - volY}
-              fill={rising ? '#2dd4bf' : '#fca5a5'}
-              opacity="0.28"
-              rx="1"
-            />
-          );
-        })}
+        <g clipPath="url(#volumePlotClip)">
+          {visibleCandles.map((candle, index) => {
+            const x = xForIndex(index);
+            const volY = Math.max(volumeTop, yForVolume(candle.volume));
+            const rising = Number(candle.close) >= Number(candle.open);
+            return (
+              <rect
+                key={`volume-${candle.date}`}
+                x={x - candleWidth / 2}
+                y={volY}
+                width={candleWidth}
+                height={height - pad.bottom - volY}
+                fill={rising ? '#14b8a6' : '#f87171'}
+                opacity="0.42"
+                rx="1"
+              />
+            );
+          })}
+        </g>
 
         {visibleCandles.map((candle, index) => {
           if (index % Math.ceil(visibleCandles.length / 7) !== 0 && index !== visibleCandles.length - 1) return null;
@@ -409,6 +445,27 @@ const TradingViewStyleChart = ({ candles = [], sma20 = [], predictions = [], isP
             </text>
           );
         })}
+
+        {hoveredCandle && (
+          <g>
+            <line x1={hoverX} x2={hoverX} y1={pad.top} y2={height - pad.bottom} stroke="#e2e8f0" strokeOpacity="0.32" strokeDasharray="4 5" />
+            <line x1={pad.left} x2={width - pad.right} y1={hoverY} y2={hoverY} stroke="#e2e8f0" strokeOpacity="0.24" strokeDasharray="4 5" />
+            <circle cx={hoverX} cy={hoverY} r="4" fill={hoverColor} stroke="#f8fafc" strokeWidth="1.5" />
+            <rect x={hoverX > width * 0.62 ? pad.left + 12 : width - pad.right - 252} y={pad.top + 12} width="240" height="116" rx="10" fill="#020617" stroke="#334155" strokeOpacity="0.9" />
+            <text x={hoverX > width * 0.62 ? pad.left + 28 : width - pad.right - 236} y={pad.top + 36} fill="#f8fafc" fontSize="13" fontWeight="800">
+              {formatDate(hoveredCandle.date)}
+            </text>
+            <text x={hoverX > width * 0.62 ? pad.left + 28 : width - pad.right - 236} y={pad.top + 58} fill="#94a3b8" fontSize="12">
+              O {formatPrice(hoveredCandle.open)}  H {formatPrice(hoveredCandle.high)}
+            </text>
+            <text x={hoverX > width * 0.62 ? pad.left + 28 : width - pad.right - 236} y={pad.top + 79} fill="#94a3b8" fontSize="12">
+              L {formatPrice(hoveredCandle.low)}  C {formatPrice(hoveredCandle.close)}
+            </text>
+            <text x={hoverX > width * 0.62 ? pad.left + 28 : width - pad.right - 236} y={pad.top + 100} fill={hoverColor} fontSize="12" fontWeight="800">
+              Volume {formatVolume(hoveredCandle.volume)}
+            </text>
+          </g>
+        )}
 
         <g transform={`translate(${pad.left}, ${height - 14})`}>
           <rect width="10" height="10" fill="#00b386" rx="2" />
@@ -1247,8 +1304,7 @@ function Prediction() {
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 sm:gap-7">
             {/* Left Column - Charts */}
             <div className="lg:col-span-2 space-y-5 sm:space-y-7">
-              {/* Legacy line forecast chart hidden so the bounded candlestick chart is the primary price view. */}
-              <div className="hidden">
+              <div className="bg-white/95 dark:bg-gray-900/95 rounded-xl sm:rounded-2xl shadow-lg p-4 sm:p-5 border border-gray-200 dark:border-gray-700 overflow-hidden">
                 <div className="flex items-center justify-between mb-3 sm:mb-4 flex-wrap gap-2">
                   <h3 className="text-base sm:text-lg lg:text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
                     <BarChart3 className="w-4 h-4 sm:w-5 sm:h-5 text-cyan-600 dark:text-cyan-400" />
@@ -1258,7 +1314,7 @@ function Prediction() {
                     {days} Days Forecast
                   </span>
                 </div>
-                <div className="w-full bg-gray-50 dark:bg-gray-900 rounded-lg p-2 sm:p-3 overflow-hidden" style={{ height: '320px', minHeight: '280px', maxHeight: '320px' }}>
+                <div className="w-full bg-gray-50 dark:bg-[#0b1220] rounded-lg p-2 sm:p-3 overflow-hidden border border-gray-100 dark:border-slate-700/70" style={{ height: '320px', minHeight: '280px', maxHeight: '320px' }}>
                   <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
                     <ComposedChart data={[
                       ...stockData.technical_chart.candles.slice(-30).map((candle, idx, arr) => {
@@ -1380,10 +1436,10 @@ function Prediction() {
                 </div>
               </div>
 
-              <div className="bg-white dark:bg-gray-900 rounded-xl sm:rounded-2xl shadow-lg p-4 sm:p-5 border border-gray-200 dark:border-gray-700 overflow-hidden">
+              <div className="bg-white/95 dark:bg-gray-900/95 rounded-xl sm:rounded-2xl shadow-lg p-4 sm:p-5 border border-gray-200 dark:border-gray-700 overflow-hidden">
                 <h3 className="text-base sm:text-lg font-bold text-gray-900 dark:text-white mb-3 flex items-center gap-2">
                   <TrendingUp className="w-4 h-4 sm:w-5 sm:h-5 text-cyan-600 dark:text-cyan-400" />
-                  <span>Price Chart</span>
+                  <span>Historical & Predicted Price</span>
                 </h3>
                 <TradingViewStyleChart
                   candles={stockData.technical_chart?.candles || []}
