@@ -200,7 +200,7 @@ class MLOpsTrainingPipeline:
             )
 
             try:
-                if os.getenv('TRAIN_ULTIMATE_ENGINE', 'true').strip().lower() in ('1', 'true', 'yes', 'on'):
+                if os.getenv('TRAIN_ULTIMATE_ENGINE', 'false').strip().lower() in ('1', 'true', 'yes', 'on'):
                     from ultimate_stock_engine_v36 import train_ultimate_model
                     print(f"Step 6b/6: Ultimate Engine v3.6 Training for {ticker}")
                     ultimate_result = train_ultimate_model(ticker, use_regime=True, generate_charts=True)

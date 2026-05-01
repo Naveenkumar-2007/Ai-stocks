@@ -1225,15 +1225,49 @@ def calculate_sentiment_from_news(ticker):
             'lower', 'shrink', 'shrinks', 'deficit', 'penalty', 'fine',
             'fraud', 'scandal', 'bankruptcy', 'default', 'collapse'
         ]
+
+        positive_phrases = {
+            'raises price target': 1.3,
+            'price target raised': 1.3,
+            'maintains buy': 1.1,
+            'beats estimates': 1.2,
+            'record revenue': 1.2,
+            'strong guidance': 1.2,
+            'upgrade to buy': 1.4,
+        }
+        negative_phrases = {
+            'lowers price target': 1.3,
+            'price target lowered': 1.3,
+            'maintains sell': 1.1,
+            'misses estimates': 1.2,
+            'weak guidance': 1.2,
+            'downgrade to sell': 1.4,
+            'target decrease': 1.1,
+        }
+        source_weights = {
+            'reuters': 1.20,
+            'bloomberg': 1.20,
+            'wall street journal': 1.15,
+            'cnbc': 1.05,
+            'marketwatch': 1.00,
+            'finnhub': 1.00,
+            'seeking alpha': 0.90,
+            'benzinga': 0.85,
+        }
         
-        # Per-headline scoring: each article gets a score from -1 to +1
-        article_scores = []
+        # Per-headline scoring: each article gets a score from -1 to +1.
+        # Weight = source_quality * exponential_time_decay * headline_importance.
+        weighted_scores = []
+        weights = []
+        now_ts = datetime.now().timestamp()
         
         for article in news:
             headline_lower = article.get('headline', '').lower()
             summary_lower = article.get('summary', '').lower()
+            source_lower = str(article.get('source', '')).lower()
+            text = f"{headline_lower} {summary_lower}"
             
-            # Count matches â€” headlines weighted 2x more than summaries
+            # Count matches - headlines weighted more than summaries.
             headline_pos = sum(1 for kw in positive_keywords if kw in headline_lower)
             headline_neg = sum(1 for kw in negative_keywords if kw in headline_lower)
             summary_pos = sum(1 for kw in positive_keywords if kw in summary_lower)
@@ -1241,15 +1275,39 @@ def calculate_sentiment_from_news(ticker):
             
             pos_score = (headline_pos * 2) + summary_pos
             neg_score = (headline_neg * 2) + summary_neg
+            pos_score += sum(weight for phrase, weight in positive_phrases.items() if phrase in text)
+            neg_score += sum(weight for phrase, weight in negative_phrases.items() if phrase in text)
+
+            # Financial nuance: "maintains neutral/market perform" is not strongly bearish
+            # even when a target is trimmed. Damp both sides toward neutrality.
+            if any(phrase in text for phrase in ['maintains neutral', 'market perform', 'equal weight']):
+                pos_score *= 0.65
+                neg_score *= 0.65
+
             total = pos_score + neg_score
             
             if total > 0:
-                # Article score: -1..+1
                 article_score = (pos_score - neg_score) / total
-                article_scores.append(article_score)
+                article_score = max(-1.0, min(1.0, article_score))
+
+                timestamp = article.get('timestamp')
+                if not timestamp:
+                    try:
+                        timestamp = datetime.strptime(str(article.get('datetime')), '%Y-%m-%d %H:%M').timestamp()
+                    except Exception:
+                        timestamp = now_ts
+                age_days = max(0.0, (now_ts - float(timestamp)) / 86400.0)
+                time_decay = float(0.5 ** (age_days / 3.0))  # 3-day half-life
+                source_weight = next(
+                    (weight for name, weight in source_weights.items() if name in source_lower),
+                    0.85
+                )
+                weight = max(0.10, min(1.50, source_weight * time_decay))
+                weighted_scores.append(article_score * weight)
+                weights.append(weight)
             # Articles with no keyword matches are skipped (not neutral)
         
-        if not article_scores:
+        if not weighted_scores or not weights:
             # No keyword matches at all â€” return neutral with article count
             return {
                 'sentiment': 'NEUTRAL',
@@ -1261,8 +1319,9 @@ def calculate_sentiment_from_news(ticker):
                 'buzz_score': min(len(news) / 10, 1.0)
             }
         
-        # Average article scores â€” this naturally produces -1..+1 range
-        score = sum(article_scores) / len(article_scores)
+        # Weighted average naturally stays in -1..+1 range.
+        score = sum(weighted_scores) / max(sum(weights), 1e-9)
+        score = max(-1.0, min(1.0, score))
         
         # Convert to percentages for display
         bullish_percent = round(((score + 1) / 2) * 100, 2)  # 0..100
@@ -1285,7 +1344,7 @@ def calculate_sentiment_from_news(ticker):
             sentiment_label = 'STRONG SELL'
             sentiment_class = 'negative'
         
-        print(f"ðŸ“Š News Sentiment ({len(article_scores)}/{len(news)} articles scored): {sentiment_label} (Score: {score:.2f})")
+        print(f"ðŸ“Š News Sentiment ({len(weighted_scores)}/{len(news)} articles scored): {sentiment_label} (Score: {score:.2f})")
         
         result = {
             'sentiment': sentiment_label,

@@ -265,6 +265,7 @@ function Prediction() {
   const [stockData, setStockData] = useState(() => getSaved('prediction_stock_data', null));
   const [sentiment, setSentiment] = useState(() => getSaved('prediction_sentiment', null));
   const [news, setNews] = useState(() => getSaved('prediction_news', []));
+  const [trainingStatus, setTrainingStatus] = useState(() => getSaved('prediction_training_status', null));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [suggestions, setSuggestions] = useState([]);
@@ -281,7 +282,8 @@ function Prediction() {
     if (stockData) localStorage.setItem('prediction_stock_data', JSON.stringify(stockData));
     if (sentiment) localStorage.setItem('prediction_sentiment', JSON.stringify(sentiment));
     if (news) localStorage.setItem('prediction_news', JSON.stringify(news));
-  }, [ticker, days, stockData, sentiment, news, hasSearched]);
+    if (trainingStatus) localStorage.setItem('prediction_training_status', JSON.stringify(trainingStatus));
+  }, [ticker, days, stockData, sentiment, news, trainingStatus, hasSearched]);
 
   // Filter performance data based on selected period
   const getPerformanceData = () => {
@@ -344,6 +346,38 @@ function Prediction() {
       }
     };
   }, []);
+
+  useEffect(() => {
+    const activeTicker = stockData?.ticker || ticker;
+    const status = trainingStatus || stockData?.model_status;
+    const shouldPoll = Boolean(
+      activeTicker &&
+      stockData &&
+      status &&
+      !status.model_ready &&
+      ['queued', 'training', 'preliminary'].includes(status.state)
+    );
+
+    if (!shouldPoll) return undefined;
+
+    const pollStatus = async () => {
+      try {
+        const { data } = await axios.get(`${API_BASE}/api/model-status/${activeTicker}`, { timeout: 10000 });
+        const nextStatus = data?.model_status;
+        if (!nextStatus) return;
+        setTrainingStatus(nextStatus);
+
+        if (nextStatus.model_ready) {
+          await fetchStockData(activeTicker, { trackStats: false, silent: true });
+        }
+      } catch (err) {
+        console.warn('Model status polling failed:', err);
+      }
+    };
+
+    const interval = setInterval(pollStatus, 10000);
+    return () => clearInterval(interval);
+  }, [stockData, trainingStatus, ticker]);
 
   const handleTickerInput = (value) => {
     if (hideSuggestionsTimeoutRef.current) {
@@ -418,8 +452,9 @@ function Prediction() {
     }, 150);
   };
 
-  const fetchStockData = async (symbol) => {
-    setLoading(true);
+  const fetchStockData = async (symbol, options = {}) => {
+    const { trackStats = true, silent = false } = options;
+    if (!silent) setLoading(true);
     setError(null);
     const headers = {};
     if (currentUser) {
@@ -449,6 +484,7 @@ function Prediction() {
       });
 
       setStockData(payload);
+      setTrainingStatus(payload?.model_status || null);
       if (
         payload?.ticker &&
         payload?.requested_ticker &&
@@ -468,14 +504,21 @@ function Prediction() {
       setNews(newsRes.data.news || []);
 
       // Track user stats
-      if (currentUser?.email) {
+      if (trackStats && currentUser?.email) {
         trackUserStats(currentUser.email, payload?.ticker || symbol);
       }
     } catch (err) {
-      setError(err.response?.data?.error || (err.request ? 'The server is still preparing market data for this symbol. Please try again in a few seconds.' : 'Failed to fetch data'));
+      const backendMessage = err.response?.data?.error;
+      const timeoutMessage = err.code === 'ECONNABORTED'
+        ? 'The market-data request timed out. This can happen on a first-time stock while the backend fetches history and starts model training. Please try again in a few seconds.'
+        : null;
+      const offlineMessage = err.request && !err.response
+        ? 'Backend API is not reachable. Start the backend on port 8000, then search again.'
+        : null;
+      setError(backendMessage || timeoutMessage || offlineMessage || 'Failed to fetch data');
       console.error(err);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
@@ -522,20 +565,22 @@ function Prediction() {
       const change = price - baseline;
       const changePercent = (change / baseline) * 100;
 
-      // Weighted Signal Logic: Consider both Price Forecast and Sentiment
-      const sentimentScore = sentiment?.score || 0;
+      const minMove = Number(entry?.min_required_move_pct ?? stockData?.recommendation?.min_required_move_pct ?? 0.35);
+      const confidence = Number(entry?.confidence ?? stockData?.recommendation?.confidence ?? 0);
+      let signal = entry?.signal || 'HOLD';
 
-      let signal = 'HOLD';
-
-      // Combination logic
-      if (changePercent >= 3 && sentimentScore > 0.1) {
-        signal = 'STRONG BUY';
-      } else if (changePercent >= 1.5 || (changePercent > 0 && sentimentScore > 0.4)) {
-        signal = 'BUY';
-      } else if (changePercent <= -3 && sentimentScore < -0.1) {
-        signal = 'STRONG SELL';
-      } else if (changePercent <= -1.5 || (changePercent < 0 && sentimentScore < -0.4)) {
-        signal = 'SELL';
+      // Conservative fallback for legacy API payloads that do not include
+      // backend row signals. Never turn tiny moves into BUY/SELL in the UI.
+      if (!entry?.signal) {
+        const finalSignal = stockData?.recommendation?.signal || stockData?.ai_signal || 'HOLD';
+        const finalScore = Number(stockData?.recommendation?.score ?? 0);
+        if (confidence >= 0.38 && Math.abs(changePercent) >= minMove) {
+          if (changePercent > 0 && finalScore > 0 && finalSignal.includes('BUY')) {
+            signal = confidence >= 0.7 && changePercent >= minMove * 2.5 ? 'STRONG BUY' : 'BUY';
+          } else if (changePercent < 0 && finalScore < 0 && finalSignal.includes('SELL')) {
+            signal = confidence >= 0.7 && Math.abs(changePercent) >= minMove * 2.5 ? 'STRONG SELL' : 'SELL';
+          }
+        }
       }
 
       return {
@@ -550,6 +595,23 @@ function Prediction() {
   };
 
   const predictionRows = computePredictionRows();
+  const finalRecommendation = stockData?.recommendation || {};
+  const headlineSignal = finalRecommendation.signal || stockData?.ai_signal || 'HOLD';
+  const headlineStance = finalRecommendation.stance || headlineSignal;
+  const signalIsBullish = headlineSignal.includes('BUY');
+  const signalIsBearish = headlineSignal.includes('SELL');
+  const activeModelStatus = trainingStatus || stockData?.model_status || {};
+  const isPreliminaryMode = activeModelStatus.analysis_mode === 'preliminary' || !activeModelStatus.model_ready;
+  const trainingProgress = Number(activeModelStatus.progress ?? 0);
+  const trainingStateLabel = activeModelStatus.model_ready
+    ? 'Custom AI Ready'
+    : activeModelStatus.state === 'training'
+      ? 'Custom AI Training'
+      : activeModelStatus.state === 'queued'
+        ? 'Training Queued'
+        : activeModelStatus.state === 'failed'
+          ? 'Training Needs Retry'
+          : 'Preliminary Analysis';
 
   // Empty state - show beautiful placeholder when no stock is selected (FIRST VISIT)
   if (!hasSearched && !loading && !stockData && !error) {
@@ -805,14 +867,68 @@ function Prediction() {
                 </div>
               </div>
 
-              <div className={`flex items-center gap-2 px-4 py-2 sm:px-6 sm:py-3 rounded-xl font-bold text-sm sm:text-base lg:text-lg ${stockData.ai_signal === 'STRONG BUY' || stockData.ai_signal === 'BUY'
+              <div className={`flex items-center gap-2 px-4 py-2 sm:px-6 sm:py-3 rounded-xl font-bold text-sm sm:text-base lg:text-lg ${signalIsBullish
                 ? 'bg-gradient-to-r from-green-100 to-green-200 dark:from-green-500/20 dark:to-green-600/20 text-green-700 dark:text-green-400 border-2 border-green-300 dark:border-green-500/30'
-                : stockData.ai_signal === 'STRONG SELL' || stockData.ai_signal === 'SELL'
+                : signalIsBearish
                   ? 'bg-gradient-to-r from-red-100 to-red-200 dark:from-red-500/20 dark:to-red-600/20 text-red-700 dark:text-red-400 border-2 border-red-300 dark:border-red-500/30'
                   : 'bg-gradient-to-r from-gray-100 to-gray-200 dark:from-gray-500/20 dark:to-gray-600/20 text-gray-700 dark:text-gray-400 border-2 border-gray-300 dark:border-gray-500/30'
                 }`}>
-                {stockData.is_profit ? <TrendingUp className="w-5 h-5 sm:w-6 sm:h-6" /> : <TrendingDown className="w-5 h-5 sm:w-6 sm:h-6" />}
-                <span className="whitespace-nowrap">{stockData.ai_signal}</span>
+                {signalIsBullish ? <TrendingUp className="w-5 h-5 sm:w-6 sm:h-6" /> : signalIsBearish ? <TrendingDown className="w-5 h-5 sm:w-6 sm:h-6" /> : <Activity className="w-5 h-5 sm:w-6 sm:h-6" />}
+                <span className="whitespace-nowrap">{headlineSignal}</span>
+              </div>
+            </div>
+
+            <div className="mt-4 grid grid-cols-1 lg:grid-cols-3 gap-3">
+              <div className="lg:col-span-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white/70 dark:bg-gray-900/50 p-3">
+                <p className="text-xs font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">Decision State</p>
+                <p className="mt-1 text-sm sm:text-base font-semibold text-gray-900 dark:text-white">{headlineStance}</p>
+                {Array.isArray(finalRecommendation.reasons) && finalRecommendation.reasons.length > 0 && (
+                  <p className="mt-1 text-xs sm:text-sm text-gray-600 dark:text-gray-400 line-clamp-2">
+                    {finalRecommendation.reasons[0]}
+                  </p>
+                )}
+              </div>
+              <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white/70 dark:bg-gray-900/50 p-3">
+                <p className="text-xs font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">Confidence</p>
+                <p className="mt-1 text-xl sm:text-2xl font-black text-gray-900 dark:text-white">
+                  {Number(finalRecommendation.confidence_percent ?? 0).toFixed(1)}%
+                </p>
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  Min move: {Number(finalRecommendation.min_required_move_pct ?? 0).toFixed(2)}%
+                </p>
+              </div>
+            </div>
+
+            <div className={`mt-4 rounded-xl border p-4 ${activeModelStatus.model_ready
+              ? 'border-green-200 dark:border-green-500/30 bg-green-50/80 dark:bg-green-500/10'
+              : 'border-blue-200 dark:border-blue-500/30 bg-blue-50/80 dark:bg-blue-500/10'
+              }`}>
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div>
+                  <p className={`text-xs font-black uppercase tracking-wide ${activeModelStatus.model_ready ? 'text-green-700 dark:text-green-400' : 'text-blue-700 dark:text-blue-400'}`}>
+                    {trainingStateLabel}
+                  </p>
+                  <p className="mt-1 text-sm font-semibold text-gray-900 dark:text-white">
+                    {activeModelStatus.model_ready
+                      ? 'Forecasts are using a trained ticker-specific model.'
+                      : 'Showing real-time market analysis while the dedicated model trains in the background.'}
+                  </p>
+                  <p className="mt-1 text-xs sm:text-sm text-gray-600 dark:text-gray-400">
+                    {activeModelStatus.message || 'The page will auto-refresh when the custom model is ready.'}
+                  </p>
+                </div>
+                <div className="min-w-[180px]">
+                  <div className="flex items-center justify-between text-xs font-bold text-gray-600 dark:text-gray-300 mb-1">
+                    <span>{activeModelStatus.stage || 'model_status'}</span>
+                    <span>{Math.max(0, Math.min(100, trainingProgress)).toFixed(0)}%</span>
+                  </div>
+                  <div className="h-2 rounded-full bg-white dark:bg-gray-800 overflow-hidden border border-gray-200 dark:border-gray-700">
+                    <div
+                      className={`h-full rounded-full transition-all duration-700 ${activeModelStatus.model_ready ? 'bg-green-500' : 'bg-blue-500'}`}
+                      style={{ width: `${Math.max(4, Math.min(100, trainingProgress))}%` }}
+                    />
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -1398,11 +1514,28 @@ function Prediction() {
                 <h3 className="text-base sm:text-lg lg:text-xl font-bold text-gray-900 dark:text-white mb-3 sm:mb-4">Forecast Signals</h3>
                 
                 {stockData.is_training ? (
-                  <div className="bg-blue-50 dark:bg-blue-900/20 border-2 border-blue-200 dark:border-blue-500/30 rounded-xl p-8 text-center animate-pulse">
-                    <i className="fas fa-robot text-4xl text-blue-500 mb-4 animate-bounce"></i>
-                    <h4 className="text-xl font-bold text-gray-900 dark:text-white mb-2">AI Model Training in Progress</h4>
-                    <p className="text-gray-600 dark:text-gray-400 font-medium max-w-md mx-auto">
-                      This stock has never been searched before. Our background MLOps pipeline is currently analyzing historical data and training a custom LSTM neural network specifically for {stockData.ticker}. Please check back in a few minutes!
+                  <div className="bg-blue-50 dark:bg-blue-900/20 border-2 border-blue-200 dark:border-blue-500/30 rounded-xl p-6 sm:p-8 text-center">
+                    <Activity className="w-10 h-10 text-blue-600 dark:text-blue-400 mx-auto mb-4 animate-pulse" />
+                    <h4 className="text-lg sm:text-xl font-bold text-gray-900 dark:text-white mb-2">{trainingStateLabel}</h4>
+                    <p className="text-gray-600 dark:text-gray-400 font-medium max-w-lg mx-auto">
+                      {isPreliminaryMode
+                        ? `This is a first-time ${stockData.ticker} request. We are showing preliminary real-time market analysis now while a custom ticker model trains in the background.`
+                        : `The custom ${stockData.ticker} model is almost ready. This section will update automatically.`}
+                    </p>
+                    <div className="max-w-md mx-auto mt-5">
+                      <div className="flex justify-between text-xs font-bold text-gray-600 dark:text-gray-300 mb-1">
+                        <span>{activeModelStatus.stage || 'training'}</span>
+                        <span>{Math.max(0, Math.min(100, trainingProgress)).toFixed(0)}%</span>
+                      </div>
+                      <div className="h-3 bg-white dark:bg-gray-800 rounded-full overflow-hidden border border-blue-200 dark:border-blue-500/30">
+                        <div
+                          className="h-full bg-gradient-to-r from-blue-500 to-cyan-500 rounded-full transition-all duration-700"
+                          style={{ width: `${Math.max(4, Math.min(100, trainingProgress))}%` }}
+                        />
+                      </div>
+                    </div>
+                    <p className="mt-4 text-xs text-gray-500 dark:text-gray-400">
+                      No aggressive BUY/SELL forecast is shown until the trained model passes readiness checks.
                     </p>
                   </div>
                 ) : (

@@ -80,6 +80,8 @@ _training_in_progress = set()
 _training_state_lock = threading.Lock()
 _ultimate_training_in_progress = set()
 _ultimate_training_state_lock = threading.Lock()
+_ticker_training_jobs = {}
+_ticker_training_jobs_lock = threading.Lock()
 
 SUFFIX_EXCHANGE_COUNTRY = {
     '.NS': ('NSE', 'India'),
@@ -103,6 +105,102 @@ def _parse_env_list(value: str | None, default: list[str]) -> list[str]:
     if not value:
         return default
     return [item.strip() for item in value.split(',') if item.strip()]
+
+
+def _update_ticker_training_job(ticker: str, *, state: str, stage: str, progress: int, message: str = '') -> None:
+    ticker_key = (ticker or '').strip().upper()
+    if not ticker_key:
+        return
+    payload = {
+        'ticker': ticker_key,
+        'state': state,
+        'stage': stage,
+        'progress': max(0, min(100, int(progress))),
+        'message': message,
+        'updated_at': datetime.utcnow().isoformat() + 'Z'
+    }
+    with _ticker_training_jobs_lock:
+        existing = _ticker_training_jobs.get(ticker_key, {})
+        payload['started_at'] = existing.get('started_at') or datetime.utcnow().isoformat() + 'Z'
+        _ticker_training_jobs[ticker_key] = payload
+
+
+def _get_ticker_training_job(ticker: str) -> dict:
+    ticker_key = (ticker or '').strip().upper()
+    with _ticker_training_jobs_lock:
+        return dict(_ticker_training_jobs.get(ticker_key, {}))
+
+
+def _ticker_has_trained_model(ticker: str) -> bool:
+    ticker_key = (ticker or '').strip().upper()
+    if not ticker_key:
+        return False
+    try:
+        from unified_engine.inference import UnifiedPredictor
+        if UnifiedPredictor.is_model_available(ticker_key):
+            return True
+    except Exception:
+        pass
+    try:
+        ultimate_path = os.path.join(
+            'mlops',
+            'ultimate_engine',
+            ticker_key.replace('/', '_').replace('\\', '_'),
+            'model.joblib'
+        )
+        if os.path.exists(ultimate_path):
+            return True
+    except Exception:
+        pass
+    try:
+        from mlops.registry import ModelRegistry
+        best = ModelRegistry().get_best_model(ticker_key)
+        if best and os.path.exists(best.get('model_path', '')):
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _build_model_status(ticker: str, *, prediction_ready: bool | None = None) -> dict:
+    ticker_key = (ticker or '').strip().upper()
+    trained_model_ready = _ticker_has_trained_model(ticker_key)
+    job = _get_ticker_training_job(ticker_key)
+    in_memory_training = ticker_key in _training_in_progress or ticker_key in _ultimate_training_in_progress
+
+    if trained_model_ready or prediction_ready:
+        state = 'ready'
+        stage = 'custom_model_ready'
+        progress = 100
+        message = 'Custom ticker model is ready. Forecasts use trained ML artifacts.'
+    elif job:
+        state = job.get('state', 'training')
+        stage = job.get('stage', 'training')
+        progress = int(job.get('progress', 25))
+        message = job.get('message') or 'Custom model training is running in the background.'
+    elif in_memory_training:
+        state = 'training'
+        stage = 'background_training'
+        progress = 35
+        message = 'Custom model training is running in the background.'
+    else:
+        state = 'preliminary'
+        stage = 'not_trained'
+        progress = 0
+        message = 'No custom model is available yet. Showing real-time preliminary market analysis.'
+
+    return {
+        'ticker': ticker_key,
+        'state': state,
+        'stage': stage,
+        'progress': progress,
+        'model_ready': bool(trained_model_ready or prediction_ready),
+        'is_training': state in ('queued', 'training'),
+        'analysis_mode': 'custom_model' if (trained_model_ready or prediction_ready) else 'preliminary',
+        'message': message,
+        'estimated_seconds_remaining': 0 if (trained_model_ready or prediction_ready) else 180,
+        'updated_at': job.get('updated_at') if job else datetime.utcnow().isoformat() + 'Z'
+    }
 
 
 def configure_logging(flask_app: Flask) -> None:
@@ -160,7 +258,9 @@ print("=" * 60)
 try:
     from scheduler import scheduler
     scheduler.start()
-    print("Automatic model training started (runs daily with startup catch-up)")
+    startup_catchup = os.getenv('ENABLE_STARTUP_CATCHUP', 'false').strip().lower() in ('1', 'true', 'yes', 'on')
+    catchup_text = "with startup catch-up" if startup_catchup else "startup catch-up disabled"
+    print(f"Automatic model training started (runs daily; {catchup_text})")
 except Exception as e:
     print(f"Could not start training scheduler: {e}")
 
@@ -296,10 +396,13 @@ def load_lstm_model(ticker):
     if not ticker:
         return None
     
-    # NEW: Register interest in this ticker immediately (adds to stocks.json + DB)
+    # Registering every searched symbol into the scheduled training list can
+    # quickly fill MLflow with old one-off stocks. Keep that opt-in.
     try:
         from mlops.config import MLOpsConfig
-        MLOpsConfig.add_stock(ticker)
+        auto_add_to_schedule = os.getenv('AUTO_ADD_SEARCHED_TICKERS_TO_TRAINING', 'false').strip().lower() in ('1', 'true', 'yes', 'on')
+        if auto_add_to_schedule:
+            MLOpsConfig.add_stock(ticker)
         # Also sync to ActiveTicker DB for admin dashboard visibility
         try:
             from models import ActiveTicker
@@ -323,6 +426,13 @@ def load_lstm_model(ticker):
             should_start_training = ticker not in _training_in_progress
             if should_start_training:
                 _training_in_progress.add(ticker)
+                _update_ticker_training_job(
+                    ticker,
+                    state='queued',
+                    stage='queued',
+                    progress=8,
+                    message='Training request accepted. Market data remains available while the model is prepared.'
+                )
 
         if not should_start_training:
             print(f"⏳ Training already in progress for {ticker}. Skipping duplicate trigger.")
@@ -335,9 +445,23 @@ def load_lstm_model(ticker):
                 # Train Unified Engine v4.0 FIRST (primary prediction path)
                 try:
                     from unified_engine.training import UnifiedTrainer
+                    _update_ticker_training_job(
+                        ticker,
+                        state='training',
+                        stage='unified_engine_training',
+                        progress=25,
+                        message='Training unified ensemble with walk-forward validation and calibration.'
+                    )
                     print(f"Background Unified Engine v4.0 training started for {ticker}")
                     ue_result = UnifiedTrainer.train(ticker)
                     if ue_result.success:
+                        _update_ticker_training_job(
+                            ticker,
+                            state='training',
+                            stage='unified_engine_complete',
+                            progress=55,
+                            message='Unified ensemble trained. Preparing sequence model and monitoring artifacts.'
+                        )
                         print(f"Unified Engine v4.0 completed for {ticker}: "
                               f"accuracy={ue_result.metrics.get('accuracy', 0):.1f}%")
                     else:
@@ -349,6 +473,13 @@ def load_lstm_model(ticker):
                 try:
                     from mlops.training_pipeline import MLOpsTrainingPipeline
                     pipeline = MLOpsTrainingPipeline()
+                    _update_ticker_training_job(
+                        ticker,
+                        state='training',
+                        stage='lstm_training',
+                        progress=65,
+                        message='Training ticker-specific LSTM forecast model.'
+                    )
                     print(f"🚀 Background V1 training started for {ticker}")
                     pipeline.train_model(ticker=ticker, epochs=20, days=730)
                     print(f"✅ Background V1 training completed for {ticker}")
@@ -356,9 +487,23 @@ def load_lstm_model(ticker):
                     print(f"⚠️ Background V1 training failed for {ticker}: {v1_err}")
 
                 # Train V2 (powers inference metrics and drift detection)
+                _update_ticker_training_job(
+                    ticker,
+                    state='training',
+                    stage='calibration_monitoring',
+                    progress=82,
+                    message='Building confidence intervals, drift checks, and model metadata.'
+                )
                 from mlops_v2.training import TrainerV2
                 trainer = TrainerV2()
                 result = trainer.train_if_needed(ticker=ticker, force=True)
+                _update_ticker_training_job(
+                    ticker,
+                    state='ready',
+                    stage='custom_model_ready',
+                    progress=100,
+                    message='Custom model is ready. New users will receive fast trained-model predictions.'
+                )
                 if result.trained:
                     print(f"✅ Background v2 training completed for {ticker}")
                 else:
@@ -490,6 +635,24 @@ def mlops_status():
         'mlflow_tracking_uri': os.getenv('MLFLOW_TRACKING_URI', 'sqlite:///mlflow.db'),
         'timestamp': datetime.now().isoformat()
     })
+
+
+@app.route('/api/model-status/<ticker>')
+def ticker_model_status(ticker):
+    """Return per-ticker model readiness and background training progress."""
+    try:
+        status = _build_model_status(ticker)
+        return jsonify({
+            'success': True,
+            'ticker': status['ticker'],
+            'model_status': status,
+        })
+    except Exception as exc:
+        return jsonify({
+            'success': False,
+            'ticker': ticker.upper(),
+            'error': str(exc)
+        }), 500
 
 # Cache management endpoints
 @app.route('/api/cache/stats')
@@ -921,6 +1084,20 @@ def get_stock_data(ticker):
         hist['MACD'] = macd_indicator.macd()
         hist['MACD_signal'] = macd_indicator.macd_signal()
         hist['MACD_histogram'] = macd_indicator.macd_diff()
+        hist['ATR'] = ta.volatility.AverageTrueRange(
+            high=hist['High'],
+            low=hist['Low'],
+            close=hist['Close'],
+            window=14
+        ).average_true_range()
+        bb_indicator = ta.volatility.BollingerBands(hist['Close'], window=20, window_dev=2)
+        hist['BB_upper'] = bb_indicator.bollinger_hband()
+        hist['BB_middle'] = bb_indicator.bollinger_mavg()
+        hist['BB_lower'] = bb_indicator.bollinger_lband()
+        hist['OBV'] = ta.volume.OnBalanceVolumeIndicator(
+            close=hist['Close'],
+            volume=hist['Volume']
+        ).on_balance_volume()
 
         hist = hist.dropna()
         if hist.empty or len(hist) < 5:
@@ -948,7 +1125,12 @@ def get_stock_data(ticker):
             'macd_signal': safe_float(latest_row.get('MACD_signal'), 3),
             'macd_histogram': safe_float(latest_row.get('MACD_histogram'), 3),
             'sma20': safe_float(latest_row.get('SMA_20')),
-            'sma50': safe_float(latest_row.get('SMA_50'))
+            'sma50': safe_float(latest_row.get('SMA_50')),
+            'atr': safe_float(latest_row.get('ATR')),
+            'bb_upper': safe_float(latest_row.get('BB_upper')),
+            'bb_middle': safe_float(latest_row.get('BB_middle')),
+            'bb_lower': safe_float(latest_row.get('BB_lower')),
+            'obv': safe_float(latest_row.get('OBV'), 0)
         }
 
         # Predictions — pass the resolved ticker so the right model is loaded
@@ -1342,6 +1524,60 @@ def get_stock_data(ticker):
                     'drift_score': 0.0,
                 }
 
+        # ------------------------------------------------------------------
+        # Final recommendation: single source of truth for backend + frontend.
+        # This replaces naive "predicted_price > current_price => BUY" behavior.
+        # ------------------------------------------------------------------
+        try:
+            from decision_engine import build_decision, signal_for_forecast_row
+
+            decision_predictions = predictions
+            if not decision_predictions and isinstance(v2_payload, dict):
+                decision_predictions = v2_payload.get('predicted_prices') or []
+            if not decision_predictions:
+                decision_predictions = [current_price]
+
+            final_decision = build_decision(
+                hist=hist,
+                current_price=current_price,
+                predictions=[float(p) for p in decision_predictions],
+                indicators=indicators,
+                sentiment=sentiment_data,
+                model_payload=v2_payload,
+            )
+            ai_signal = final_decision.signal
+
+            # If the primary forecast list was empty but the inference payload
+            # has calibrated prices, use them for cards/charts/tables.
+            if not predictions and len(decision_predictions) > 0:
+                predictions = [float(p) for p in decision_predictions[:days]]
+                tomorrow_prediction = predictions[0]
+                profit_loss = tomorrow_prediction - current_price
+                profit_loss_percent = (profit_loss / current_price) * 100 if current_price else 0
+
+            for row in future_predictions:
+                row_price = row.get('price')
+                if row_price is not None:
+                    row['signal'] = signal_for_forecast_row(
+                        base_price=current_price,
+                        predicted_price=float(row_price),
+                        final_decision=final_decision,
+                    )
+                    row['confidence'] = safe_float(final_decision.confidence, 4)
+                    row['min_required_move_pct'] = safe_float(final_decision.min_required_move_pct, 3)
+        except Exception as decision_err:
+            print(f"Decision engine failed, falling back to HOLD-safe signal: {decision_err}")
+            final_decision = None
+            if abs(profit_loss_percent) < 0.35:
+                ai_signal = 'HOLD'
+            for row in future_predictions:
+                row.setdefault('signal', 'HOLD')
+
+        model_status = _build_model_status(
+            resolved_ticker,
+            prediction_ready=bool(len(predictions) > 0 and _ticker_has_trained_model(resolved_ticker))
+        )
+
         response = {
             'success': True,
             'ticker': resolved_ticker,
@@ -1356,14 +1592,23 @@ def get_stock_data(ticker):
             'profit_loss_percent': safe_float(profit_loss_percent),
             'is_profit': bool(profit_loss > 0),
             'ai_signal': ai_signal,
+            'recommendation': final_decision.to_dict() if final_decision else {
+                'signal': ai_signal,
+                'stance': 'Uncertain Market',
+                'confidence': 0,
+                'confidence_percent': 0,
+                'reasons': ['Decision engine unavailable; defaulted to conservative display.']
+            },
             'day_change': safe_float(day_change),
             'day_change_percent': safe_float(day_change_percent),
             'day_high': safe_float(day_high),
             'day_low': safe_float(day_low),
             'volume': volume,
             'predicted_volume': predicted_volumes,
-            'is_training': len(predictions) == 0,
-            'prediction_ready': len(predictions) > 0,
+            'is_training': model_status.get('is_training') or len(predictions) == 0,
+            'prediction_ready': bool(model_status.get('model_ready') and len(predictions) > 0),
+            'analysis_mode': model_status.get('analysis_mode'),
+            'model_status': model_status,
             'market_cap': market_cap,
             'pe_ratio': safe_float(pe_ratio) if isinstance(pe_ratio, (int, float)) and not pd.isna(pe_ratio) else None,
             'days_predicted': days,
@@ -1569,17 +1814,39 @@ def predict_multi_day_lstm(hist, current_price, days, ticker):
             print(f"v3.6 training already in progress for {ticker_key}.")
             return
 
+        _update_ticker_training_job(
+            ticker,
+            state='queued',
+            stage='queued',
+            progress=8,
+            message='Training request accepted. Market data remains available while the model is prepared.'
+        )
+
         def background_train():
             try:
                 print(f"Background v3.6 training started for {ticker_key}")
                 from ultimate_stock_engine_v36 import train_ultimate_model
                 train_result = train_ultimate_model(ticker_key, use_regime=True, generate_charts=True)
                 if train_result:
+                    _update_ticker_training_job(
+                        ticker_key,
+                        state='ready',
+                        stage='custom_model_ready',
+                        progress=100,
+                        message='Custom regime-aware model is ready.'
+                    )
                     print(f"Background v3.6 training completed for {ticker_key}")
                 else:
                     print(f"Background v3.6 training returned no artifact for {ticker_key}")
             except Exception as train_err:
                 print(f"Background v3.6 training failed for {ticker_key}: {train_err}")
+                _update_ticker_training_job(
+                    ticker_key,
+                    state='failed',
+                    stage='training_failed',
+                    progress=0,
+                    message=f'Custom regime-aware training failed: {train_err}'
+                )
             finally:
                 with _ultimate_training_state_lock:
                     _ultimate_training_in_progress.discard(ticker_key)

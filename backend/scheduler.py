@@ -105,7 +105,7 @@ class ModelTrainingScheduler:
             # Dynamic reload: catch any new stocks added by "Train-on-Demand"
             self.stocks = MLOpsConfig.get_stocks()
             
-            logger.info(f"⏰ [MLOps] Starting scheduled training for {len(self.stocks)} stocks...")
+            logger.info("[MLOps] Starting scheduled training for %s stocks...", len(self.stocks))
             self.last_training_time = datetime.now()
             
             from mlops.training_pipeline import MLOpsTrainingPipeline
@@ -117,7 +117,7 @@ class ModelTrainingScheduler:
             batch_size = 20
             for i in range(0, len(self.stocks), batch_size):
                 batch = self.stocks[i:i + batch_size]
-                logger.info(f"📦 [MLOps] Processing batch: {batch}")
+                logger.info("[MLOps] Processing batch: %s", batch)
                 
                 for ticker in batch:
                     try:
@@ -130,19 +130,23 @@ class ModelTrainingScheduler:
                             results[ticker] = {'status': 'skipped_already_trained'}
                             continue
                             
-                        logger.info(f"🧠 [MLOps] Training: {ticker}...")
+                        logger.info("[MLOps] Training: %s...", ticker)
                         
-                        # Train Ultimate Engine v3.6 first (primary prediction path)
-                        try:
-                            from ultimate_stock_engine_v36 import train_ultimate_model
-                            v36_result = train_ultimate_model(ticker, use_regime=True, generate_charts=True)
-                            if v36_result:
-                                logger.info(f"✅ [v3.6] {ticker}: accuracy={v36_result.get('accuracy', 0):.1f}%, "
-                                           f"sharpe={v36_result.get('sharpe_ratio', 0):.2f}")
-                            else:
-                                logger.info(f"⚠️ [v3.6] {ticker} training returned None")
-                        except Exception as v36_err:
-                            logger.error(f"❌ [v3.6] {ticker} error: {v36_err}")
+                        # Optional v3.6 scheduled training. Disabled by default to avoid
+                        # duplicate MLflow runs when V1 or on-demand training also runs.
+                        if os.getenv('SCHEDULER_TRAIN_ULTIMATE_ENGINE', 'false').strip().lower() in ('1', 'true', 'yes', 'on'):
+                            try:
+                                from ultimate_stock_engine_v36 import train_ultimate_model
+                                v36_result = train_ultimate_model(ticker, use_regime=True, generate_charts=True)
+                                if v36_result:
+                                    logger.info("v3.6 %s: accuracy=%.1f%%, sharpe=%.2f",
+                                                ticker,
+                                                v36_result.get('accuracy', 0),
+                                                v36_result.get('sharpe_ratio', 0))
+                                else:
+                                    logger.info("v3.6 %s training returned None", ticker)
+                            except Exception as v36_err:
+                                logger.error("v3.6 %s error: %s", ticker, v36_err)
 
                         # Legacy V1 training
                         model_info = pipeline.train_model(
@@ -156,7 +160,7 @@ class ModelTrainingScheduler:
                             if 'Insufficient data' in model_info.get('message', ''):
                                 status = 'insufficient_data'
                             results[ticker] = {'status': status, 'message': model_info.get('message')}
-                            logger.warning(f"⚠️ [MLOps] {ticker} train skipped: {model_info.get('message')}")
+                            logger.warning("[MLOps] %s train skipped: %s", ticker, model_info.get('message'))
                             continue
 
                         results[ticker] = {
@@ -165,13 +169,13 @@ class ModelTrainingScheduler:
                             'status': 'success'
                         }
                     except Exception as e:
-                        logger.error(f"❌ [MLOps] Training failed for {ticker}: {e}")
+                        logger.error("[MLOps] Training failed for %s: %s", ticker, e)
                         results[ticker] = {'error': str(e), 'status': 'failed'}
                 
                 # Sleep if there are more batches to process
                 if i + batch_size < len(self.stocks):
                     wait_time = 10
-                    logger.info(f"⏳ [MLOps] API Safety: Sleeping for {wait_time} seconds before next batch...")
+                    logger.info("[MLOps] API Safety: sleeping for %s seconds before next batch...", wait_time)
                     time.sleep(wait_time)
             
             # --- Store results ---
@@ -217,12 +221,12 @@ class ModelTrainingScheduler:
             schedule.run_pending()
             time.sleep(60) # Internal check every minute
         
-        logger.info("🛑 MLOps Scheduler Stopped")
+        logger.info("MLOps Scheduler stopped")
     
     def start(self):
         """Start the scheduler in a background thread with a file lock to prevent duplicates"""
         if self.is_running:
-            logger.warning("⚠️ MLOps Scheduler already running in this process")
+            logger.warning("MLOps Scheduler already running in this process")
             return
             
         # Use a file lock to prevent multiple Gunicorn workers from starting separate schedulers
@@ -235,13 +239,13 @@ class ModelTrainingScheduler:
                 # In production, we'd use fcntl (Unix) or msvcrt (Windows), but for a simple
                 # cross-platform fix, we can check if it was created recently.
                 # However, since Gunicorn kills/restarts workers, we'll just log it.
-                logger.info("ℹ️ MLOps Scheduler lock file detected. Checking if redundant...")
+                logger.info("MLOps Scheduler lock file detected. Checking if redundant...")
             
             # For simplicity in this environment, we will rely on the app.py check
             # but we'll add a check for the 'GUNICORN_WORKER_ID' or similar if reachable.
             # Best practice for Gunicorn: only start in one worker.
             if os.environ.get('GUNICORN_WORKER_ID', '1') != '1':
-                logger.info("⏭️ MLOps Scheduler: Skipping startup in secondary Gunicorn worker.")
+                logger.info("MLOps Scheduler: skipping startup in secondary Gunicorn worker.")
                 return
 
             self.is_running = True
@@ -256,7 +260,7 @@ class ModelTrainingScheduler:
         self.is_running = False
         if self.thread:
             self.thread.join(timeout=5)
-        logger.info("🛑 MLOps Scheduler joined and stopped")
+        logger.info("MLOps Scheduler joined and stopped")
     
     def get_status(self):
         """Get scheduler status"""

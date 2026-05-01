@@ -211,7 +211,18 @@ def save_ultimate_model(ticker, artifact):
         import mlflow
         from mlops.config import MLOpsConfig
         mlflow.set_tracking_uri(MLOpsConfig.MLFLOW_TRACKING_URI)
-        mlflow.set_experiment(f"ultimate_engine_v36")
+        experiment_name = "ultimate_engine_v36"
+        try:
+            mlflow.set_experiment(experiment_name)
+        except Exception as first_err:
+            if "deleted" not in str(first_err).lower():
+                raise
+            client = mlflow.tracking.MlflowClient()
+            exp = client.get_experiment_by_name(experiment_name)
+            if exp and exp.lifecycle_stage == "deleted":
+                client.restore_experiment(exp.experiment_id)
+                print(f"  Restored deleted MLflow experiment '{experiment_name}'")
+            mlflow.set_experiment(experiment_name)
 
         with mlflow.start_run(run_name=f"v36-{ticker}-{datetime.utcnow().strftime('%Y%m%d')}"):
             # Log metrics
