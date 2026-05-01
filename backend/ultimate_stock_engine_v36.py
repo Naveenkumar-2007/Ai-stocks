@@ -230,6 +230,12 @@ def save_ultimate_model(ticker, artifact):
             mlflow.log_artifact(paths['artifact'], artifact_path=f"models/{ticker}")
             mlflow.log_artifact(paths['metadata'], artifact_path=f"models/{ticker}")
 
+            # Log charts if available
+            charts = artifact.get('charts', {})
+            for chart_name, chart_path in charts.items():
+                if chart_path and os.path.exists(chart_path):
+                    mlflow.log_artifact(chart_path, artifact_path=f"charts/{ticker}")
+
         print(f"  ☁️ Model logged to MLflow/DagsHub for {ticker}")
     except Exception as mlflow_err:
         print(f"  ⚠️ MLflow logging skipped for {ticker}: {mlflow_err}")

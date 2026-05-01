@@ -1575,7 +1575,7 @@ def predict_multi_day_lstm(hist, current_price, days, ticker):
                 # No trained model exists — trigger on-demand v3.6 training
                 print(f"⚠️ No v3.6 model for {ticker}. Triggering on-demand training...")
                 try:
-                    train_result = train_ultimate_model(ticker, use_regime=True, generate_charts=False)
+                    train_result = train_ultimate_model(ticker, use_regime=True, generate_charts=True)
                     if train_result:
                         # Retry prediction after training
                         ultimate_payload = predict_ultimate_realtime(ticker, hist, current_price=current_price, days=days)

@@ -133,7 +133,7 @@ class ModelTrainingScheduler:
                         # Train Ultimate Engine v3.6 first (primary prediction path)
                         try:
                             from ultimate_stock_engine_v36 import train_ultimate_model
-                            v36_result = train_ultimate_model(ticker, use_regime=True, generate_charts=False)
+                            v36_result = train_ultimate_model(ticker, use_regime=True, generate_charts=True)
                             if v36_result:
                                 logger.info(f"✅ [v3.6] {ticker}: accuracy={v36_result.get('accuracy', 0):.1f}%, "
                                            f"sharpe={v36_result.get('sharpe_ratio', 0):.2f}")
