@@ -501,6 +501,7 @@ def reset_mlops_state():
     wipe_mlflow_experiment = bool(data.get('wipe_mlflow_experiment', False))
     wipe_all_mlflow_experiments = bool(data.get('wipe_all_mlflow_experiments', False))
     wipe_mlflow_registered_models = bool(data.get('wipe_mlflow_registered_models', False))
+    wipe_ultimate_mlflow_experiment = bool(data.get('wipe_ultimate_mlflow_experiment', True))
     seed_stocks = data.get('seed_stocks', [])
     if not isinstance(seed_stocks, list):
         seed_stocks = []
@@ -513,7 +514,10 @@ def reset_mlops_state():
         Path('mlops/model_registry/metadata.json'),
         Path('mlops/model_registry/global_features.json'),
         Path('mlops/model_registry/global_scalers.pkl'),
+        Path('mlops/ultimate_engine'),
         Path('mlops_v2/models'),
+        Path('unified_engine/models'),
+        Path('unified_engine/training_results.json'),
         Path('mlops/metrics/all_stocks_metrics.json'),
         Path('mlops/metrics/summary.json')
     ]:
@@ -557,7 +561,7 @@ def reset_mlops_state():
         "registered_model_delete_errors": [],
         "error": None
     }
-    if wipe_mlflow_experiment or wipe_all_mlflow_experiments or wipe_mlflow_registered_models:
+    if wipe_mlflow_experiment or wipe_all_mlflow_experiments or wipe_mlflow_registered_models or wipe_ultimate_mlflow_experiment:
         mlflow_reset['attempted'] = True
         try:
             import mlflow
@@ -592,20 +596,36 @@ def reset_mlops_state():
                     client.delete_experiment(exp.experiment_id)
                     mlflow_reset['deleted_experiments'].append(exp.name)
             else:
-                exp_name = os.getenv('MLFLOW_EXPERIMENT_NAME', 'Prediction_Lineage')
-                exp = client.get_experiment_by_name(exp_name)
-                if exp:
-                    client.delete_experiment(exp.experiment_id)
-                    mlflow_reset['deleted_experiment'] = exp_name
+                experiment_names = []
+                if wipe_mlflow_experiment:
+                    experiment_names.append(os.getenv('MLFLOW_EXPERIMENT_NAME', 'Prediction_Lineage'))
+                if wipe_ultimate_mlflow_experiment:
+                    experiment_names.append('ultimate_engine_v36')
+
+                for exp_name in dict.fromkeys(experiment_names):
+                    exp = client.get_experiment_by_name(exp_name)
+                    if exp and getattr(exp, 'lifecycle_stage', 'active') == 'active':
+                        client.delete_experiment(exp.experiment_id)
+                        mlflow_reset['deleted_experiments'].append(exp_name)
+                        if mlflow_reset['deleted_experiment'] is None:
+                            mlflow_reset['deleted_experiment'] = exp_name
         except Exception as exc:
             mlflow_reset['error'] = str(exc)
 
     try:
         import app as app_module
-        for cache_name in ('_model_cache', '_scaler_cache', '_model_metadata'):
+        for cache_name in ('_model_cache', '_scaler_cache', '_model_metadata', '_ultimate_prediction_cache'):
             cache = getattr(app_module, cache_name, None)
             if isinstance(cache, dict):
                 cache.clear()
+    except Exception:
+        pass
+
+    try:
+        import ultimate_stock_engine_v36 as ultimate_module
+        cache = getattr(ultimate_module, 'ULTIMATE_MODEL_CACHE', None)
+        if isinstance(cache, dict):
+            cache.clear()
     except Exception:
         pass
 

@@ -154,6 +154,8 @@ function AdminDashboard() {
           clear_prediction_logs: true,
           clear_active_tickers: true,
           wipe_mlflow_experiment: true,
+          wipe_ultimate_mlflow_experiment: true,
+          wipe_mlflow_registered_models: true,
           seed_stocks: seedStocks
         })
       });

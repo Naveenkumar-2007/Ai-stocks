@@ -256,6 +256,11 @@ def load_ultimate_model(ticker):
         ULTIMATE_MODEL_CACHE[ticker] = artifact
         return artifact
 
+    allow_mlflow_download = os.getenv('ALLOW_MLFLOW_MODEL_REUSE', 'true').strip().lower() in ('1', 'true', 'yes', 'on')
+    if not allow_mlflow_download:
+        print(f"  MLflow artifact reuse disabled for {ticker}; fresh training required")
+        return None
+
     # Try MLflow/DagsHub (for cloud deployment where local models don't exist)
     try:
         import mlflow
