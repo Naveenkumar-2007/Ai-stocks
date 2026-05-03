@@ -475,7 +475,7 @@ def train_unified_model(ticker: str, generate_charts: bool = False) -> TrainResu
         tracking_uri = MLOpsConfig._resolve_mlflow_tracking_uri()
         if tracking_uri:
             mlflow.set_tracking_uri(tracking_uri)
-            mlflow.set_experiment("Unified_Engine_v5.2")
+            mlflow.set_experiment("Unified_Engine_Production")
             with mlflow.start_run(run_name=f"{ticker}_{model_version}"):
                 mlflow.log_params({
                     "ticker": ticker,
