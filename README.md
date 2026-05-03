@@ -27,7 +27,7 @@ An enterprise-grade, real-time stock market prediction platform powered by a **M
 
 The **AI Stock Forecasting Performance Monitor** below highlights our latest v5.2 walk-forward cross-validation results. The engine evaluates technical/volume indicators across a diverse 10-stock global portfolio (US Mega-cap Tech + Indian NSE). 
 
-![AI Stock Forecasting Performance Monitor](backend/monitoring/reports/ultimate_v52_dashboard.png)
+![AI Stock Forecasting Performance Monitor](backend/monitoring/reports/combined_multimarket_monitoring.png)
 
 ### Key v5.2 Breakthroughs
 *   **Dual-Model Ensemble**: Fuses two XGBoost estimators (differing regularizations) with a Random Forest meta-learner to capture distinct market regimes.
