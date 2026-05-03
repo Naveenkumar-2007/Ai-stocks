@@ -476,7 +476,8 @@ def train_unified_model(ticker: str, generate_charts: bool = False) -> TrainResu
         if tracking_uri:
             mlflow.set_tracking_uri(tracking_uri)
             mlflow.set_experiment("Unified_Engine_Production")
-            with mlflow.start_run(run_name=f"{ticker}_{model_version}"):
+            run = mlflow.start_run(run_name=f"{ticker}_{model_version}")
+            try:
                 mlflow.log_params({
                     "ticker": ticker,
                     "engine_version": "v5.2",
@@ -491,10 +492,18 @@ def train_unified_model(ticker: str, generate_charts: bool = False) -> TrainResu
                     "binom_pvalue": float(binom_pvalue),
                     "fold_mean_acc": float(np.mean(fold_accs))
                 })
-                mlflow.log_artifact(str(artifact_path), "unified_model")
-                print(f"  ✅ MLflow: Logged run for {ticker}")
+                try:
+                    mlflow.log_artifact(str(artifact_path), "unified_model")
+                except Exception as artifact_e:
+                    print(f"  ⚠️ MLflow artifact logging failed: {artifact_e}", flush=True)
+                mlflow.end_run()
+                print(f"  ✅ MLflow: Logged run for {ticker}", flush=True)
+            except Exception as e:
+                mlflow.end_run(status="FAILED")
+                print(f"  ⚠️ MLflow logging failed during metrics/params: {e}", flush=True)
+                
     except Exception as e:
-        print(f"  ⚠️ MLflow logging skipped/failed: {e}")
+        print(f"  ⚠️ MLflow logging skipped/failed: {e}", flush=True)
 
     return TrainResult(
         ticker=ticker, success=True, metrics=artifact["metrics"],
