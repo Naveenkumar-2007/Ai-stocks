@@ -25,9 +25,9 @@ An enterprise-grade, real-time stock market prediction platform powered by a **M
 
 ## 🏆 Engine v5.2: Multi-Market Portfolio Performance
 
-The **AI Stock Forecasting Performance Monitor** below highlights our latest v5.2 walk-forward cross-validation results. The engine evaluates technical/volume indicators across a diverse 10-stock global portfolio (US Mega-cap Tech + Indian NSE). 
+The **Institutional Predictive Alpha Portfolio Analysis** below highlights the latest v5.2 walk-forward cross-validation results. The engine monitored all 10 trained stocks across the portfolio (US Mega-cap Tech + Indian NSE): `INFY`, `GOOGL`, `NVDA`, `TCS`, `AAPL`, `MSFT`, `AMZN`, `RELIANCE`, `TSLA`, and `META`.
 
-![AI Stock Forecasting Performance Monitor](backend/monitoring/reports/combined_multimarket_monitoring.png)
+![Institutional Predictive Alpha Portfolio Analysis](backend/monitoring/institutional_predictive_alpha_portfolio_analysis.png)
 
 ### Key v5.2 Breakthroughs
 *   **Dual-Model Ensemble**: Fuses two XGBoost estimators (differing regularizations) with a Random Forest meta-learner to capture distinct market regimes.

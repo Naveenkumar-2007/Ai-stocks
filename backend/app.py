@@ -203,6 +203,54 @@ def _build_model_status(ticker: str, *, prediction_ready: bool | None = None) ->
     }
 
 
+def _metric_as_percent(value) -> float:
+    try:
+        numeric = float(value or 0.0)
+        return numeric * 100.0 if 0.0 <= numeric <= 1.0 else numeric
+    except Exception:
+        return 0.0
+
+
+def _publish_training_metrics(ticker: str, metrics: dict | None) -> None:
+    """Push the latest training metrics into Prometheus/Grafana gauges."""
+    metrics = metrics or {}
+    try:
+        from mlops_v2.monitoring import set_accuracy_20d, set_drift_score, set_sharpe_ratio, set_simulated_pnl
+
+        accuracy = metrics.get('accuracy', metrics.get('directional_accuracy', metrics.get('xgb_accuracy', 0.0)))
+        set_accuracy_20d(ticker, _metric_as_percent(accuracy))
+
+        if 'drift_score' in metrics:
+            set_drift_score(ticker, float(metrics.get('drift_score') or 0.0))
+        if 'simulated_pnl' in metrics:
+            set_simulated_pnl(ticker, float(metrics.get('simulated_pnl') or 0.0))
+        if 'sharpe_ratio' in metrics:
+            set_sharpe_ratio(ticker, float(metrics.get('sharpe_ratio') or 0.0))
+    except Exception as monitoring_err:
+        print(f"Failed to update monitoring gauges for {ticker}: {monitoring_err}")
+
+
+def _run_v2_observability_training(ticker: str) -> None:
+    """
+    Train the v2 observability path for unseen tickers.
+    This writes DVC-friendly raw-data manifests, logs MLflow/DagsHub runs,
+    saves v2 model metadata, and refreshes Grafana gauges.
+    """
+    try:
+        from mlops_v2.training import TrainerV2
+
+        result = TrainerV2().train_if_needed(ticker=ticker, force=True)
+        metrics = dict(result.metrics or {})
+        metrics['drift_score'] = result.drift_score
+        _publish_training_metrics(ticker, metrics)
+        if result.trained:
+            print(f"✅ V2 observability training completed for {ticker}; run_id={result.run_id or 'local'}")
+        else:
+            print(f"⚠️ V2 observability training skipped for {ticker}: {result.reason}")
+    except Exception as obs_err:
+        print(f"⚠️ V2 observability training failed for {ticker}: {obs_err}")
+
+
 def configure_logging(flask_app: Flask) -> None:
     log_level = os.getenv('LOG_LEVEL', 'INFO').upper()
     os.makedirs('logs', exist_ok=True)
@@ -497,6 +545,9 @@ def load_lstm_model(ticker):
                 from mlops_v2.training import TrainerV2
                 trainer = TrainerV2()
                 result = trainer.train_if_needed(ticker=ticker, force=True)
+                metrics = dict(result.metrics or {})
+                metrics['drift_score'] = result.drift_score
+                _publish_training_metrics(ticker, metrics)
                 _update_ticker_training_job(
                     ticker,
                     state='ready',
@@ -1487,7 +1538,7 @@ def get_stock_data(ticker):
                         metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
                         metrics = metadata.get("metrics", {})
                         
-                        accuracy = float(metrics.get("xgb_accuracy", 0.0))
+                        accuracy = _metric_as_percent(metrics.get("xgb_accuracy", 0.0))
                         set_accuracy_20d(resolved_ticker, accuracy)
                         
                         pnl = float(metrics.get("simulated_pnl", 0.0))
@@ -1856,9 +1907,15 @@ def predict_multi_day_lstm(hist, current_price, days, ticker):
                 from unified_engine.training import train_unified_model
                 train_result = train_unified_model(ticker_key)
                 if train_result and train_result.success:
+                    _publish_training_metrics(ticker_key, train_result.metrics)
+                    _update_ticker_training_job(
+                        ticker_key, state='training', stage='v2_observability_training',
+                        progress=82, message='Publishing MLflow, DVC, and Grafana observability artifacts.'
+                    )
+                    _run_v2_observability_training(ticker_key)
                     _update_ticker_training_job(
                         ticker_key, state='ready', stage='custom_model_ready',
-                        progress=100, message='Unified Engine v5.0 model is ready.'
+                        progress=100, message='Unified Engine v5.0 model and observability artifacts are ready.'
                     )
                     print(f"✅ Background v5.0 training completed for {ticker_key}", flush=True)
                 else:

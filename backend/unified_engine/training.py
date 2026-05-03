@@ -482,8 +482,8 @@ def train_unified_model(ticker: str, generate_charts: bool = False) -> TrainResu
                     "ticker": ticker,
                     "engine_version": "v5.2",
                     "n_features": len(selected),
-                    "training_samples": len(hist_clean),
-                    "scale_pos_weight": float(scale_pos_weight)
+                    "training_samples": int(len(X_all)),
+                    "scale_pos_weight": float(adaptive_scale)
                 })
                 mlflow.log_metrics({
                     "accuracy": float(accuracy),
@@ -499,7 +499,11 @@ def train_unified_model(ticker: str, generate_charts: bool = False) -> TrainResu
                 mlflow.end_run()
                 print(f"  ✅ MLflow: Logged run for {ticker}", flush=True)
             except Exception as e:
-                mlflow.end_run(status="FAILED")
+                try:
+                    mlflow.set_tag("mlflow_logging_warning", str(e)[:250])
+                except Exception:
+                    pass
+                mlflow.end_run(status="FINISHED")
                 print(f"  ⚠️ MLflow logging failed during metrics/params: {e}", flush=True)
                 
     except Exception as e:

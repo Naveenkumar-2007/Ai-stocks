@@ -137,6 +137,23 @@ class ModelTrainingScheduler:
                             logger.warning("[MLOps] %s train skipped: %s", ticker, train_result.reason)
                             continue
 
+                        try:
+                            from mlops_v2.monitoring import set_accuracy_20d, set_drift_score, set_sharpe_ratio, set_simulated_pnl
+
+                            accuracy = float(train_result.metrics.get('accuracy', 0.0) or 0.0)
+                            set_accuracy_20d(ticker, accuracy)
+
+                            from mlops_v2.training import TrainerV2
+                            v2_result = TrainerV2().train_if_needed(ticker=ticker, force=True)
+                            v2_metrics = v2_result.metrics or {}
+                            v2_accuracy = float(v2_metrics.get('directional_accuracy', v2_metrics.get('xgb_accuracy', 0.0)) or 0.0)
+                            set_accuracy_20d(ticker, v2_accuracy * 100.0 if 0.0 <= v2_accuracy <= 1.0 else v2_accuracy)
+                            set_drift_score(ticker, float(v2_result.drift_score or 0.0))
+                            set_simulated_pnl(ticker, float(v2_metrics.get('simulated_pnl', 0.0) or 0.0))
+                            set_sharpe_ratio(ticker, float(v2_metrics.get('sharpe_ratio', 0.0) or 0.0))
+                        except Exception as obs_err:
+                            logger.warning("[MLOps] Observability sync skipped for %s: %s", ticker, obs_err)
+
                         results[ticker] = {
                             'version': train_result.model_version,
                             'accuracy': train_result.metrics.get('accuracy', 'N/A'),

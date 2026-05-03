@@ -27,6 +27,9 @@ backend/data/raw/
 backend/data/processed/
 backend/data/interim/
 backend/.dvc/
+!backend/.dvc/
+backend/.dvc/*
+!backend/.dvc/config
 backend/dvc-cache/
 backend/airflow/logs/
 backend/airflow/airflow.db

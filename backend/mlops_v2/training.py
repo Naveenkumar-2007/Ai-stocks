@@ -247,7 +247,13 @@ class TrainerV2:
                 def save(self, *_args, **_kwargs):
                     pass
 
-            return Dummy(), 1.0
+            return Dummy(), {
+                "val_loss": 1.0,
+                "mae": 0.0,
+                "rmse": 0.0,
+                "r2": 0.0,
+                "mape": 0.0,
+            }
 
         split = int(len(xs) * 0.8)
         X_train, X_val = xs[:split], xs[split:]

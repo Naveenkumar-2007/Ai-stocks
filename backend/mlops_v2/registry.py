@@ -50,6 +50,25 @@ def _set_experiment_safe(experiment_name: str) -> None:
             raise
 
 
+def _safe_metric(value, default: float = 0.0) -> float:
+    try:
+        out = float(value)
+        if out != out or out in (float("inf"), float("-inf")):
+            return default
+        return out
+    except Exception:
+        return default
+
+
+def _log_artifact_safe(mlflow_module, local_path: Path | str, artifact_path: str) -> None:
+    try:
+        path = Path(local_path)
+        if path.exists():
+            mlflow_module.log_artifact(str(path), artifact_path=artifact_path)
+    except Exception as exc:
+        print(f"⚠️ MLflow artifact logging skipped for {artifact_path}: {exc}")
+
+
 def log_mlflow_run(
     ticker: str,
     xgb_model,
@@ -82,38 +101,35 @@ def log_mlflow_run(
                 mlflow.log_params(params)
                 
             mlflow.log_metrics({
-                "xgb_accuracy": float(metrics.get("xgb_accuracy", 0.0)),
-                "lstm_val_loss": float(metrics.get("lstm_val_loss", 0.0)),
-                "directional_accuracy": float(metrics.get("directional_accuracy", metrics.get("xgb_accuracy", 0.0))),
-                "drift_score": float(drift_score),
-                "data_points": float(data_points),
-                "mape": float(metrics.get("mape", 0.0)),
-                "price_mae": float(metrics.get("price_mae", 0.0)),
-                "price_rmse": float(metrics.get("price_rmse", 0.0)),
-                "r2_score": float(metrics.get("r2_score", 0.0)),
-                "val_loss": float(metrics.get("val_loss", 0.0)),
-                "val_mae": float(metrics.get("val_mae", 0.0)),
-                "validation_loss": float(metrics.get("validation_loss", 0.0)),
-                "simulated_pnl": float(metrics.get("simulated_pnl", 0.0)),
-                "sharpe_ratio": float(metrics.get("sharpe_ratio", 0.0)),
+                "xgb_accuracy": _safe_metric(metrics.get("xgb_accuracy")),
+                "lstm_val_loss": _safe_metric(metrics.get("lstm_val_loss")),
+                "directional_accuracy": _safe_metric(metrics.get("directional_accuracy", metrics.get("xgb_accuracy"))),
+                "drift_score": _safe_metric(drift_score),
+                "data_points": _safe_metric(data_points),
+                "mape": _safe_metric(metrics.get("mape")),
+                "price_mae": _safe_metric(metrics.get("price_mae")),
+                "price_rmse": _safe_metric(metrics.get("price_rmse")),
+                "r2_score": _safe_metric(metrics.get("r2_score")),
+                "val_loss": _safe_metric(metrics.get("val_loss")),
+                "val_mae": _safe_metric(metrics.get("val_mae")),
+                "validation_loss": _safe_metric(metrics.get("validation_loss")),
+                "simulated_pnl": _safe_metric(metrics.get("simulated_pnl")),
+                "sharpe_ratio": _safe_metric(metrics.get("sharpe_ratio")),
             })
 
             # Log Evidently AI HTML Reports to DagsHub
             from pathlib import Path
             val_report = metrics.get("validation_report_path")
-            if val_report and Path(val_report).exists():
-                mlflow.log_artifact(str(val_report), artifact_path="evidently_reports")
+            if val_report:
+                _log_artifact_safe(mlflow, val_report, "evidently_reports")
                 
             drift_report = metrics.get("drift_report_path")
-            if drift_report and Path(drift_report).exists():
-                mlflow.log_artifact(str(drift_report), artifact_path="evidently_reports")
+            if drift_report:
+                _log_artifact_safe(mlflow, drift_report, "evidently_reports")
 
             xgb_artifact_name = f"{ticker}_xgb_model"
-            if model_paths.xgb_model.exists():
-                mlflow.log_artifact(str(model_paths.xgb_model), artifact_path=xgb_artifact_name)
-
-            if model_paths.lstm_model.exists():
-                mlflow.log_artifact(str(model_paths.lstm_model), artifact_path=f"{ticker}_lstm_model")
+            _log_artifact_safe(mlflow, model_paths.xgb_model, xgb_artifact_name)
+            _log_artifact_safe(mlflow, model_paths.lstm_model, f"{ticker}_lstm_model")
 
             # Best effort: if this is a TensorFlow model, also log as MLflow TF flavor.
             try:
@@ -123,7 +139,11 @@ def log_mlflow_run(
             except Exception:
                 pass
 
-            _register_model_with_promotion(mlflow, run.info.run_id, ticker, metrics)
+            try:
+                _register_model_with_promotion(mlflow, run.info.run_id, ticker, metrics)
+            except Exception as registry_err:
+                mlflow.set_tag("model_registry_warning", str(registry_err)[:250])
+                print(f"⚠️ MLflow model registry promotion skipped for {ticker}: {registry_err}")
             return run.info.run_id
 
     except Exception as e:
