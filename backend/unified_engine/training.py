@@ -487,7 +487,7 @@ def train_unified_model(ticker: str, generate_charts: bool = False) -> TrainResu
                     "f1_score": float(f1),
                     "auc": float(auc),
                     "binom_pvalue": float(binom_pvalue),
-                    "fold_mean_acc": float(fold_mean)
+                    "fold_mean_acc": float(np.mean(fold_accs))
                 })
                 mlflow.log_artifact(str(artifact_path), "unified_model")
                 print(f"  ✅ MLflow: Logged run for {ticker}")
