@@ -1534,8 +1534,6 @@ def get_stock_data(ticker):
             decision_predictions = predictions
             if not decision_predictions and isinstance(v2_payload, dict):
                 decision_predictions = v2_payload.get('predicted_prices') or []
-            if not decision_predictions:
-                decision_predictions = [current_price]
 
             final_decision = build_decision(
                 hist=hist,
@@ -1854,7 +1852,7 @@ def predict_multi_day_lstm(hist, current_price, days, ticker):
 
         def background_train():
             try:
-                print(f"Background v5.0 training started for {ticker_key}")
+                print(f"Background v5.0 training started for {ticker_key}", flush=True)
                 from unified_engine.training import train_unified_model
                 train_result = train_unified_model(ticker_key)
                 if train_result and train_result.success:
@@ -1862,16 +1860,16 @@ def predict_multi_day_lstm(hist, current_price, days, ticker):
                         ticker_key, state='ready', stage='custom_model_ready',
                         progress=100, message='Unified Engine v5.0 model is ready.'
                     )
-                    print(f"✅ Background v5.0 training completed for {ticker_key}")
+                    print(f"✅ Background v5.0 training completed for {ticker_key}", flush=True)
                 else:
                     reason = train_result.reason if train_result else "unknown"
-                    print(f"Background v5.0 training failed for {ticker_key}: {reason}")
+                    print(f"Background v5.0 training failed for {ticker_key}: {reason}", flush=True)
                     _update_ticker_training_job(
                         ticker_key, state='failed', stage='training_failed',
                         progress=0, message=f'Training failed: {reason}'
                     )
             except Exception as train_err:
-                print(f"Background v5.0 training failed for {ticker_key}: {train_err}")
+                print(f"Background v5.0 training failed for {ticker_key}: {train_err}", flush=True)
                 _update_ticker_training_job(
                     ticker_key, state='failed', stage='training_failed',
                     progress=0, message=f'Training failed: {train_err}'

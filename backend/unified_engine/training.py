@@ -125,18 +125,18 @@ def train_unified_model(ticker: str, generate_charts: bool = False) -> TrainResu
         artifact_path="", reason=reason, trained_at=trained_at,
     )
 
-    print(f"\n{'='*70}")
-    print(f"  UNIFIED ENGINE v5.0 — TRAINING: {ticker}")
-    print(f"{'='*70}")
+    print(f"\n{'='*70}", flush=True)
+    print(f"  UNIFIED ENGINE v5.0 — TRAINING: {ticker}", flush=True)
+    print(f"{'='*70}", flush=True)
 
     # === STEP 1: Fetch data ===
-    print("\n[1/10] Fetching historical data...")
+    print("\n[1/10] Fetching historical data...", flush=True)
     df = _fetch_data(ticker)
     if df.empty or len(df) < CONFIG.min_total_rows:
         return fail(f"Insufficient data: {len(df)} rows (need {CONFIG.min_total_rows})")
 
     # === STEP 2: Compute ALL candidate features ===
-    print("[2/10] Computing all candidate features...")
+    print("[2/10] Computing all candidate features...", flush=True)
     full_engine = get_feature_engine(selected_features=None)
     full_artifacts = full_engine.compute(df, fit_scaler=True)
     print(f"  → {len(full_artifacts.column_order)} features, {len(full_artifacts.features)} rows")
@@ -471,8 +471,10 @@ def train_unified_model(ticker: str, generate_charts: bool = False) -> TrainResu
     try:
         import mlflow
         from mlops.config import MLOpsConfig
-        if MLOpsConfig.MLFLOW_TRACKING_URI:
-            mlflow.set_tracking_uri(MLOpsConfig.MLFLOW_TRACKING_URI)
+        MLOpsConfig.configure_mlflow_env()
+        tracking_uri = MLOpsConfig._resolve_mlflow_tracking_uri()
+        if tracking_uri:
+            mlflow.set_tracking_uri(tracking_uri)
             mlflow.set_experiment("Unified_Engine_v5.2")
             with mlflow.start_run(run_name=f"{ticker}_{model_version}"):
                 mlflow.log_params({
