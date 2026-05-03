@@ -1,6 +1,0 @@
-train:
-  epochs: 20
-  batch_size: 32
-  days: 730
-  max_stocks: 61
-  start_from: null

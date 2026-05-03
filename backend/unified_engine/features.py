@@ -1,6 +1,6 @@
 """
-Unified Engine — Feature Engineering (SINGLE SOURCE OF TRUTH)
-=============================================================
+Unified Engine — Feature Engineering (SINGLE SOURCE OF TRUTH)  v5.0
+=====================================================================
 This is the ONLY place features are computed.
 Both training AND inference MUST use this module.
 
@@ -9,14 +9,14 @@ Design principles:
 2. Column order is FROZEN and deterministic (sorted alphabetically)
 3. A feature hash is stored with the model to detect mismatches at inference
 4. Feature importance drives selection — unused features are pruned
+5. Includes mean-reversion, momentum-acceleration, and calendar signals
 """
 
 from __future__ import annotations
 
 import hashlib
-import json
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional
 
 import numpy as np
 import pandas as pd
@@ -24,11 +24,9 @@ from sklearn.preprocessing import RobustScaler
 
 
 # =============================================================================
-# CANONICAL FEATURE LIST (sorted alphabetically for deterministic ordering)
+# CANONICAL FEATURE LIST  (sorted alphabetically for deterministic ordering)
 # =============================================================================
 
-# These are ALL candidate features. After training, feature importance will
-# select a subset. But the computation order never changes.
 _ALL_CANDIDATE_FEATURES = sorted([
     # --- Returns ---
     "return_1d",
@@ -37,7 +35,7 @@ _ALL_CANDIDATE_FEATURES = sorted([
     "return_10d",
     "return_20d",
     "log_return_1d",
-    # --- Return lags (autoregressive) ---
+    # --- Return lags (autoregressive memory) ---
     "return_lag_1",
     "return_lag_2",
     "return_lag_3",
@@ -55,33 +53,63 @@ _ALL_CANDIDATE_FEATURES = sorted([
     "macd_hist_ratio",
     # --- Oscillators ---
     "rsi_14",
+    "rsi_7",                       # v5.1: faster RSI for short-term signals
     "stoch_k",
     "stoch_d",
+    "williams_r",                  # v5.1: Williams %R oscillator
     # --- Volatility ---
     "volatility_10d",
     "volatility_20d",
     "bb_width_ratio",
     "bb_position",
     "atr_ratio",
+    "volatility_ratio",
+    "parkinson_vol",               # v5.1: intraday range-based volatility
     # --- Volume ---
     "volume_ratio_5",
     "volume_ratio_20",
     "volume_zscore_20",
     "obv_normalized",
+    "volume_breakout",
+    "volume_price_confirm",        # v5.1: do price and volume agree?
+    "force_index_norm",            # v5.1: force index (price × volume)
+    "chaikin_mf_proxy",            # v5.1: money flow proxy
     # --- Price position ---
     "daily_range_position",
     "overnight_gap_pct",
+    # --- Candle microstructure (v5.1) ---
+    "candle_body_ratio",           # v5.1: |close-open| / range
+    "upper_shadow_ratio",          # v5.1: rejection wicks
+    "lower_shadow_ratio",          # v5.1: absorption wicks
     # --- Momentum ---
     "momentum_roc_5",
     "momentum_roc_10",
     "momentum_roc_20",
+    "price_acceleration",
+    "momentum_consistency",        # v5.1: % of last N days that were positive
     # --- Trend strength ---
     "adx_proxy",
     "dist_to_20d_high_ratio",
     "dist_to_20d_low_ratio",
+    "trend_strength_5_20",         # v5.1: SMA5 vs SMA20 cross-over signal
+    "trend_strength_10_50",        # v5.1: SMA10 vs SMA50
     # --- Higher moments ---
     "return_skew_20",
     "return_kurt_20",
+    # --- Serial correlation (v5.1) ---
+    "return_autocorr_5",           # v5.1: return predictability
+    "return_autocorr_20",          # v5.1: longer-term serial dependence
+    # --- Mean-reversion signals ---
+    "zscore_20d",
+    "zscore_50d",
+    "mean_reversion_5d",
+    # --- Calendar / seasonality ---
+    "day_of_week_sin",
+    "day_of_week_cos",
+    "month_sin",
+    "month_cos",
+    # --- Realized-vs-Implied volatility proxy ---
+    "vol_regime",
 ])
 
 
@@ -250,6 +278,16 @@ class UnifiedFeatureEngine:
         feat["volatility_10d"] = feat["return_1d"].rolling(10, min_periods=10).std() * np.sqrt(252)
         feat["volatility_20d"] = feat["return_1d"].rolling(20, min_periods=20).std() * np.sqrt(252)
 
+        # NEW: Volatility ratio (short / long — detects vol regime changes)
+        vol_5 = feat["return_1d"].rolling(5, min_periods=5).std()
+        vol_20 = feat["return_1d"].rolling(20, min_periods=20).std()
+        feat["volatility_ratio"] = vol_5 / (vol_20 + 1e-10)
+
+        # NEW: Vol regime (is current vol above or below median?)
+        vol_60 = feat["return_1d"].rolling(60, min_periods=30).std()
+        vol_median = vol_60.rolling(252, min_periods=60).median()
+        feat["vol_regime"] = (vol_60 - vol_median) / (vol_median + 1e-10)
+
         # === BOLLINGER BANDS ===
         bb_middle = close.rolling(20, min_periods=20).mean()
         bb_std = close.rolling(20, min_periods=20).std()
@@ -281,14 +319,48 @@ class UnifiedFeatureEngine:
         vol_avg = volume.rolling(20, min_periods=5).mean()
         feat["obv_normalized"] = (volume * direction) / (vol_avg + 1e-10)
 
+        # Volume breakout (binary: volume > 2σ above 20d mean)
+        feat["volume_breakout"] = (feat["volume_zscore_20"] > 2.0).astype(float)
+
+        # v5.1: Volume-price confirmation (do price and volume agree?)
+        price_up = (close.diff() > 0).astype(float)
+        volume_up = (volume.diff() > 0).astype(float)
+        feat["volume_price_confirm"] = (price_up == volume_up).astype(float).rolling(5, min_periods=3).mean()
+
+        # v5.1: Force Index normalized (close change × volume, relative to avg)
+        force_raw = close.diff() * volume
+        force_avg = force_raw.rolling(13, min_periods=5).mean()
+        force_norm = force_raw.rolling(20, min_periods=5).std()
+        feat["force_index_norm"] = force_avg / (force_norm + 1e-10)
+
+        # v5.1: Chaikin Money Flow proxy (accumulation/distribution)
+        mf_multiplier = ((close - low) - (high - close)) / (high - low + 1e-10)
+        mf_volume = mf_multiplier * volume
+        feat["chaikin_mf_proxy"] = mf_volume.rolling(20, min_periods=10).sum() / (volume.rolling(20, min_periods=10).sum() + 1e-10)
+
         # === PRICE POSITION ===
         feat["daily_range_position"] = (close - low) / (high - low + 1e-10)
         feat["overnight_gap_pct"] = (open_price - close.shift(1)) / (close.shift(1) + 1e-10)
+
+        # === CANDLE MICROSTRUCTURE (v5.1) ===
+        body = (close - open_price).abs()
+        full_range = high - low + 1e-10
+        feat["candle_body_ratio"] = body / full_range
+        feat["upper_shadow_ratio"] = (high - pd.concat([close, open_price], axis=1).max(axis=1)) / full_range
+        feat["lower_shadow_ratio"] = (pd.concat([close, open_price], axis=1).min(axis=1) - low) / full_range
 
         # === MOMENTUM (Rate of Change) ===
         feat["momentum_roc_5"] = close / close.shift(5) - 1
         feat["momentum_roc_10"] = close / close.shift(10) - 1
         feat["momentum_roc_20"] = close / close.shift(20) - 1
+
+        # Price acceleration (2nd derivative — rate of trend change)
+        roc_5 = close / close.shift(5) - 1
+        roc_5_prev = roc_5.shift(5)
+        feat["price_acceleration"] = roc_5 - roc_5_prev
+
+        # v5.1: Momentum consistency (% of last 10 days that were positive)
+        feat["momentum_consistency"] = price_up.rolling(10, min_periods=5).mean()
 
         # === TREND STRENGTH ===
         high_range = high.rolling(10, min_periods=10).max() - low.rolling(10, min_periods=10).min()
@@ -299,9 +371,69 @@ class UnifiedFeatureEngine:
         feat["dist_to_20d_high_ratio"] = (high_20 - close) / (close + 1e-10)
         feat["dist_to_20d_low_ratio"] = (close - low_20) / (close + 1e-10)
 
+        # v5.1: Cross-MA trend strength (SMA alignment)
+        sma_5 = close.rolling(5, min_periods=5).mean()
+        sma_20_trend = close.rolling(20, min_periods=20).mean()
+        sma_10 = close.rolling(10, min_periods=10).mean()
+        sma_50_trend = close.rolling(50, min_periods=50).mean()
+        feat["trend_strength_5_20"] = (sma_5 - sma_20_trend) / (close + 1e-10)
+        feat["trend_strength_10_50"] = (sma_10 - sma_50_trend) / (close + 1e-10)
+
         # === HIGHER MOMENTS ===
         feat["return_skew_20"] = feat["return_1d"].rolling(20, min_periods=20).skew()
         feat["return_kurt_20"] = feat["return_1d"].rolling(20, min_periods=20).kurt()
+
+        # === SERIAL CORRELATION (v5.1) ===
+        feat["return_autocorr_5"] = feat["return_1d"].rolling(20, min_periods=10).apply(
+            lambda x: x.autocorr(lag=1) if len(x) > 5 else 0, raw=False
+        )
+        feat["return_autocorr_20"] = feat["return_1d"].rolling(60, min_periods=20).apply(
+            lambda x: x.autocorr(lag=5) if len(x) > 10 else 0, raw=False
+        )
+
+        # === MEAN-REVERSION SIGNALS ===
+        sma_20 = close.rolling(20, min_periods=20).mean()
+        std_20 = close.rolling(20, min_periods=20).std()
+        feat["zscore_20d"] = (close - sma_20) / (std_20 + 1e-10)
+
+        sma_50 = close.rolling(50, min_periods=50).mean()
+        std_50 = close.rolling(50, min_periods=50).std()
+        feat["zscore_50d"] = (close - sma_50) / (std_50 + 1e-10)
+
+        # Mean-reversion tendency: negative correlation between past and future returns
+        feat["mean_reversion_5d"] = -feat["return_5d"]  # sign-flip of recent return
+
+        # === WILLIAMS %R (v5.1) ===
+        highest_14_wr = high.rolling(14, min_periods=14).max()
+        lowest_14_wr = low.rolling(14, min_periods=14).min()
+        feat["williams_r"] = (highest_14_wr - close) / (highest_14_wr - lowest_14_wr + 1e-10) * -100
+
+        # === RSI-7 (v5.1: faster RSI) ===
+        delta7 = close.diff()
+        gain7 = delta7.where(delta7 > 0, 0.0).rolling(7, min_periods=7).mean()
+        loss7 = (-delta7.where(delta7 < 0, 0.0)).rolling(7, min_periods=7).mean()
+        rs7 = gain7 / (loss7 + 1e-10)
+        feat["rsi_7"] = 100 - (100 / (1 + rs7))
+
+        # === PARKINSON VOLATILITY (v5.1: uses high-low range, more efficient) ===
+        log_hl = np.log(high / (low + 1e-10))
+        feat["parkinson_vol"] = np.sqrt(
+            (1 / (4 * np.log(2))) * (log_hl ** 2).rolling(20, min_periods=10).mean()
+        ) * np.sqrt(252)
+
+        # === CALENDAR / SEASONALITY ===
+        if isinstance(data.index, pd.DatetimeIndex):
+            dow = data.index.dayofweek  # 0=Monday, 4=Friday
+            month = data.index.month
+            feat["day_of_week_sin"] = np.sin(2 * np.pi * dow / 5)
+            feat["day_of_week_cos"] = np.cos(2 * np.pi * dow / 5)
+            feat["month_sin"] = np.sin(2 * np.pi * month / 12)
+            feat["month_cos"] = np.cos(2 * np.pi * month / 12)
+        else:
+            feat["day_of_week_sin"] = 0.0
+            feat["day_of_week_cos"] = 1.0
+            feat["month_sin"] = 0.0
+            feat["month_cos"] = 1.0
 
         return feat
 

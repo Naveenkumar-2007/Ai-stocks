@@ -108,9 +108,6 @@ class ModelTrainingScheduler:
             logger.info("[MLOps] Starting scheduled training for %s stocks...", len(self.stocks))
             self.last_training_time = datetime.now()
             
-            from mlops.training_pipeline import MLOpsTrainingPipeline
-            pipeline = MLOpsTrainingPipeline()
-            
             results = {}
             
             # --- Rate-Limited Batch Processing ---
@@ -126,46 +123,24 @@ class ModelTrainingScheduler:
                         today = datetime.now().date()
                         
                         if last_run_date == today:
-                            # Reducing verbosity for already trained stocks
                             results[ticker] = {'status': 'skipped_already_trained'}
                             continue
                             
                         logger.info("[MLOps] Training: %s...", ticker)
                         
-                        # Optional v3.6 scheduled training. Disabled by default to avoid
-                        # duplicate MLflow runs when V1 or on-demand training also runs.
-                        if os.getenv('SCHEDULER_TRAIN_ULTIMATE_ENGINE', 'false').strip().lower() in ('1', 'true', 'yes', 'on'):
-                            try:
-                                from ultimate_stock_engine_v36 import train_ultimate_model
-                                v36_result = train_ultimate_model(ticker, use_regime=True, generate_charts=True)
-                                if v36_result:
-                                    logger.info("v3.6 %s: accuracy=%.1f%%, sharpe=%.2f",
-                                                ticker,
-                                                v36_result.get('accuracy', 0),
-                                                v36_result.get('sharpe_ratio', 0))
-                                else:
-                                    logger.info("v3.6 %s training returned None", ticker)
-                            except Exception as v36_err:
-                                logger.error("v3.6 %s error: %s", ticker, v36_err)
-
-                        # Legacy V1 training
-                        model_info = pipeline.train_model(
-                            ticker=ticker,
-                            epochs=20,  # High-accuracy training
-                            days=730    # Full historical window
-                        )
+                        # Unified Engine v5.0 — the ONLY training path
+                        from unified_engine.training import train_unified_model
+                        train_result = train_unified_model(ticker)
                         
-                        if model_info.get('success') is False:
-                            status = 'skipped'
-                            if 'Insufficient data' in model_info.get('message', ''):
-                                status = 'insufficient_data'
-                            results[ticker] = {'status': status, 'message': model_info.get('message')}
-                            logger.warning("[MLOps] %s train skipped: %s", ticker, model_info.get('message'))
+                        if not train_result.success:
+                            results[ticker] = {'status': 'skipped', 'message': train_result.reason}
+                            logger.warning("[MLOps] %s train skipped: %s", ticker, train_result.reason)
                             continue
 
                         results[ticker] = {
-                            'version': model_info.get('version', '?'),
-                            'mape': model_info.get('metrics', {}).get('mape', 'N/A'),
+                            'version': train_result.model_version,
+                            'accuracy': train_result.metrics.get('accuracy', 'N/A'),
+                            'auc': train_result.metrics.get('auc', 'N/A'),
                             'status': 'success'
                         }
                     except Exception as e:

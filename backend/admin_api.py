@@ -309,10 +309,9 @@ def force_retrain(ticker):
     
     def background_train():
         try:
-            from mlops.training_pipeline import MLOpsTrainingPipeline
+            from unified_engine.training import train_unified_model
             print(f"[ADMIN] 🚀 Force retraining started for {ticker}")
-            pipeline = MLOpsTrainingPipeline()
-            pipeline.train_model(ticker=ticker, epochs=20, days=730)
+            train_result = train_unified_model(ticker)
             
             import datetime
             db_ticker = db_session.query(ActiveTicker).filter_by(ticker=ticker).first()
@@ -326,6 +325,10 @@ def force_retrain(ticker):
                     current_drift_score=0.0
                 ))
             db_session.commit()
+            if train_result.success:
+                print(f"[ADMIN] ✅ Force retrain completed for {ticker}: {train_result.model_version}")
+            else:
+                print(f"[ADMIN] ⚠️ Force retrain failed for {ticker}: {train_result.reason}")
         except Exception as e:
             print(f"[ADMIN] Force retraining failed: {e}")
             
@@ -622,10 +625,8 @@ def reset_mlops_state():
         pass
 
     try:
-        import ultimate_stock_engine_v36 as ultimate_module
-        cache = getattr(ultimate_module, 'ULTIMATE_MODEL_CACHE', None)
-        if isinstance(cache, dict):
-            cache.clear()
+        from unified_engine.inference import clear_cache as clear_unified_cache
+        clear_unified_cache()
     except Exception:
         pass
 

@@ -75,3 +75,8 @@ backend/v36_training_results.json
 backend/local_custom_training_results.json
 backend/train_local_custom.py
 backend/charts/*.png
+# Runtime generated
+backend/build/
+backend/data/ai_stocks.db
+_lfs_temp/
+*.pyc

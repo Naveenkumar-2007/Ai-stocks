@@ -1662,6 +1662,12 @@ def get_stock_data(ticker):
             'indicator_trends': indicator_trends,
             'performance': performance,
             'performance_chart': performance_chart,
+            # Price RANGES from quantile regression (like real trading apps)
+            'price_range_low': cached_payload.get('price_range_low', []) if (cached_payload := _ultimate_prediction_cache.get(resolved_ticker.upper())) else [],
+            'price_range_high': cached_payload.get('price_range_high', []) if (cached_payload := _ultimate_prediction_cache.get(resolved_ticker.upper())) else [],
+            'price_range_q25': cached_payload.get('price_range_q25', []) if (cached_payload := _ultimate_prediction_cache.get(resolved_ticker.upper())) else [],
+            'price_range_q75': cached_payload.get('price_range_q75', []) if (cached_payload := _ultimate_prediction_cache.get(resolved_ticker.upper())) else [],
+            'quantile_returns': cached_payload.get('quantile_returns', {}) if (cached_payload := _ultimate_prediction_cache.get(resolved_ticker.upper())) else {},
             'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         }
 
@@ -1824,267 +1830,100 @@ def unified_engine_status():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 def predict_multi_day_lstm(hist, current_price, days, ticker):
-    """Predict multiple days ahead — Unified Engine v4.0 is the primary path."""
+    """
+    Predict multiple days ahead — Unified Engine v5.0 is the ONLY path.
+    Returns price RANGES (not exact prices) like real trading apps.
+    """
     import numpy as np
-    import ta as ta_lib
-    
-    predictions = []
 
-    def trigger_background_ultimate_training():
+    def trigger_background_training():
         ticker_key = ticker.upper()
         with _ultimate_training_state_lock:
-            should_start_training = ticker_key not in _ultimate_training_in_progress
-            if should_start_training:
+            should_start = ticker_key not in _ultimate_training_in_progress
+            if should_start:
                 _ultimate_training_in_progress.add(ticker_key)
 
-        if not should_start_training:
-            print(f"v3.6 training already in progress for {ticker_key}.")
+        if not should_start:
+            print(f"Training already in progress for {ticker_key}.")
             return
 
         _update_ticker_training_job(
-            ticker,
-            state='queued',
-            stage='queued',
-            progress=8,
+            ticker, state='queued', stage='queued', progress=8,
             message='Training request accepted. Market data remains available while the model is prepared.'
         )
 
         def background_train():
             try:
-                print(f"Background v3.6 training started for {ticker_key}")
-                from ultimate_stock_engine_v36 import train_ultimate_model
-                train_result = train_ultimate_model(ticker_key, use_regime=True, generate_charts=True)
-                if train_result:
+                print(f"Background v5.0 training started for {ticker_key}")
+                from unified_engine.training import train_unified_model
+                train_result = train_unified_model(ticker_key)
+                if train_result and train_result.success:
                     _update_ticker_training_job(
-                        ticker_key,
-                        state='ready',
-                        stage='custom_model_ready',
-                        progress=100,
-                        message='Custom regime-aware model is ready.'
+                        ticker_key, state='ready', stage='custom_model_ready',
+                        progress=100, message='Unified Engine v5.0 model is ready.'
                     )
-                    print(f"Background v3.6 training completed for {ticker_key}")
+                    print(f"✅ Background v5.0 training completed for {ticker_key}")
                 else:
-                    print(f"Background v3.6 training returned no artifact for {ticker_key}")
+                    reason = train_result.reason if train_result else "unknown"
+                    print(f"Background v5.0 training failed for {ticker_key}: {reason}")
+                    _update_ticker_training_job(
+                        ticker_key, state='failed', stage='training_failed',
+                        progress=0, message=f'Training failed: {reason}'
+                    )
             except Exception as train_err:
-                print(f"Background v3.6 training failed for {ticker_key}: {train_err}")
+                print(f"Background v5.0 training failed for {ticker_key}: {train_err}")
                 _update_ticker_training_job(
-                    ticker_key,
-                    state='failed',
-                    stage='training_failed',
-                    progress=0,
-                    message=f'Custom regime-aware training failed: {train_err}'
+                    ticker_key, state='failed', stage='training_failed',
+                    progress=0, message=f'Training failed: {train_err}'
                 )
             finally:
                 with _ultimate_training_state_lock:
                     _ultimate_training_in_progress.discard(ticker_key)
 
         threading.Thread(target=background_train, daemon=True).start()
-    
+
     try:
         _ultimate_prediction_cache.pop(ticker.upper(), None)
 
-        # =====================================================================
-        # PRIMARY PATH: Ultimate Engine v3.6 (PROVEN — real backtested results)
-        # 4-model ensemble + regime detection + calibrated predictions
-        # =====================================================================
+        # =================================================================
+        # SINGLE PATH: Unified Engine v5.0
+        # XGBoost + LightGBM + Quantile Regression + Meta-Learner
+        # =================================================================
         try:
-            from ultimate_stock_engine_v36 import predict_ultimate_realtime
-            ultimate_payload = predict_ultimate_realtime(ticker, hist, current_price=current_price, days=days)
-            if ultimate_payload and ultimate_payload.get('predicted_prices'):
-                _ultimate_prediction_cache[ticker.upper()] = ultimate_payload
-                print(f"✅ v3.6 prediction for {ticker}: signal={ultimate_payload.get('signal')}, "
-                      f"prob={ultimate_payload.get('direction_prob', 0):.3f}, "
-                      f"confidence={ultimate_payload.get('confidence', 0):.3f}")
-                
-                # Update Prometheus metrics for Grafana
+            from unified_engine.inference import UnifiedPredictor
+            payload = UnifiedPredictor.predict(
+                ticker, hist, current_price=current_price, days=days
+            )
+            if payload and payload.get('predicted_prices'):
+                _ultimate_prediction_cache[ticker.upper()] = payload
+                print(f"✅ v5.0 prediction for {ticker}: signal={payload.get('signal')}, "
+                      f"prob={payload.get('direction_prob', 0):.3f}, "
+                      f"confidence={payload.get('confidence', 0):.3f}")
+
+                # Update Prometheus metrics
                 try:
-                    from mlops_v2.monitoring import set_accuracy_20d, set_simulated_pnl, set_sharpe_ratio, inc_prediction
-                    metrics = ultimate_payload.get('metrics', {})
-                    if 'accuracy' in metrics:
-                        set_accuracy_20d(ticker.upper(), metrics['accuracy'])
-                    if 'total_return' in metrics:
-                        set_simulated_pnl(ticker.upper(), metrics['total_return'])
-                    if 'sharpe_ratio' in metrics:
-                        set_sharpe_ratio(ticker.upper(), metrics['sharpe_ratio'])
+                    from mlops_v2.monitoring import inc_prediction
                     inc_prediction(ticker.upper())
-                except Exception as metric_err:
-                    print(f"⚠️ Prometheus metrics update failed for {ticker}: {metric_err}")
-                    
-                return ultimate_payload['predicted_prices']
-            else:
-                # No trained model exists. Train in the background so the API can
-                # still return market data before frontend/proxy timeouts fire.
-                print(f"No v3.6 model for {ticker}. Triggering background training...")
-                trigger_background_ultimate_training()
-        except Exception as ultimate_err:
-            print(f"Ultimate Engine v3.6 unavailable for {ticker}: {ultimate_err}")
-
-        current_model = load_lstm_model(ticker)
-        
-        if current_model is None:
-            # User specifically requested NOT to give mathematical calculations as a fallback.
-            # Instead, we return an empty list to indicate that the model is still training in the background.
-            return []
-        
-        # Determine the model's expected input feature count
-        expected_features = current_model.input_shape[-1]  # last dim of (batch, seq, features)
-        
-        # Try to load the saved scaler for this specific ticker
-        saved_scaler = load_saved_scaler(ticker)
-        
-        if saved_scaler is not None:
-            # --- Robust multi-feature path (matches training pipeline) ---
-            # Determine how many features the model and scaler expect
-            n_features_model = current_model.input_shape[-1]
-            try:
-                n_features_scaler = saved_scaler.n_features_in_
-            except AttributeError:
-                n_features_scaler = n_features_model # Fallback for older sklearn
-            
-            # Load feature list for THIS ticker from training
-            import json as json_mod
-            feature_path = f'artifacts/{ticker}_features.json'
-            # Fallback to general library in registry
-            training_features = None
-            try:
-                from mlops.registry import ModelRegistry
-                registry = ModelRegistry()
-                training_features = registry.get_features_from_library(ticker)
-            except Exception:
-                pass
-                
-            if not training_features and os.path.exists(feature_path):
-                try:
-                    with open(feature_path, 'r') as f:
-                        training_features = json_mod.load(f)
+                    metrics = payload.get('metrics', {})
+                    if 'accuracy' in metrics:
+                        from mlops_v2.monitoring import set_accuracy_20d
+                        set_accuracy_20d(ticker.upper(), metrics['accuracy'])
                 except Exception:
-                    training_features = None
-            
-            # Build feature DataFrame matching training (DataIngestion)
-            import pandas as pd
-            feature_df = pd.DataFrame()
-            close = hist['Close'].squeeze()
-            high = hist['High'] if 'High' in hist.columns else close
-            low = hist['Low'] if 'Low' in hist.columns else close
-            volume = hist['Volume'] if 'Volume' in hist.columns else 0
-            
-            # --- STATIONARY FEATURES (Matching DataIngestion) ---
-            feature_df['returns'] = close.pct_change()
-            feature_df['log_returns'] = np.log(close / close.shift(1))
-            
-            # Ratios
-            feature_df['sma_5_ratio'] = close.rolling(window=5).mean() / close
-            feature_df['sma_10_ratio'] = close.rolling(window=10).mean() / close
-            feature_df['sma_20_ratio'] = close.rolling(window=20).mean() / close
-            feature_df['sma_50_ratio'] = close.rolling(window=50).mean() / close
-            feature_df['ema_12_ratio'] = close.ewm(span=12, adjust=False).mean() / close
-            feature_df['ema_26_ratio'] = close.ewm(span=26, adjust=False).mean() / close
-            
-            # MACD Ratios
-            # Note: We calculate MACD manually or via ta-lib, but always normalize by close
-            ema_12 = close.ewm(span=12, adjust=False).mean()
-            ema_26 = close.ewm(span=26, adjust=False).mean()
-            macd = ema_12 - ema_26
-            macd_signal = macd.ewm(span=9, adjust=False).mean()
-            
-            feature_df['macd_ratio'] = macd / close
-            feature_df['macd_signal_ratio'] = macd_signal / close
-            feature_df['macd_hist_ratio'] = (macd - macd_signal) / close
-            
-            # Momentum / Volatility
-            feature_df['rsi'] = ta_lib.momentum.RSIIndicator(close, window=14).rsi()
-            bb = ta_lib.volatility.BollingerBands(close, window=20)
-            feature_df['bb_middle_ratio'] = bb.bollinger_mavg() / close
-            feature_df['bb_upper_ratio'] = bb.bollinger_hband() / close
-            feature_df['bb_lower_ratio'] = bb.bollinger_lband() / close
-            feature_df['bb_width_ratio'] = (bb.bollinger_hband() - bb.bollinger_lband()) / close
-            feature_df['atr_ratio'] = ta_lib.volatility.AverageTrueRange(high, low, close, window=14).average_true_range() / close
-            feature_df['volatility'] = feature_df['returns'].rolling(window=20).std()
-            
-            # Volume
-            feature_df['volume_sma_20'] = volume.rolling(window=20).mean()
-            feature_df['volume_ratio'] = volume / feature_df['volume_sma_20'].replace(0, np.nan)
-            
-            direction = np.sign(close.diff().fillna(0))
-            volume_avg = volume.rolling(window=20).mean().replace(0, np.nan)
-            feature_df['obv'] = (volume * direction) / volume_avg.fillna(volume.mean() + 1e-9)
-            
-            # Lags
-            for lag in [1, 2, 3, 5]:
-                feature_df[f'returns_lag_{lag}'] = feature_df['returns'].shift(lag)
-            
-            # Drop intermediate calculation columns if they aren't in canonical list
-            if 'volume_sma_20' in feature_df.columns:
-                feature_df = feature_df.drop(columns=['volume_sma_20'])
-                
-            feature_df = feature_df.dropna()
-            
-            # CRITICAL: Feature Alignment
-            if training_features:
-                feature_df = feature_df[[c for c in training_features if c in feature_df.columns]]
-            
-            if feature_df.shape[1] != n_features_model:
-                print(f"⚠️ Feature mismatch for {ticker}: model expects {n_features_model}, got {feature_df.shape[1]}. Falling back...")
-                raise ValueError("Feature mismatch")
+                    pass
 
-            if len(feature_df) < 10:
-                raise ValueError("Insufficient data for multi-feature prediction")
-            
-            # Scale using synchronized scaler
-            scaled_data = saved_scaler.transform(feature_df.values)
-            
-            model_seq_len = current_model.input_shape[1]
-            sequence_length = min(model_seq_len, len(scaled_data))
-            
-            if len(scaled_data) < model_seq_len:
-                pad_count = model_seq_len - len(scaled_data)
-                padding = np.tile(scaled_data[0:1], (pad_count, 1))
-                scaled_data = np.vstack([padding, scaled_data])
-                sequence_length = model_seq_len
-            
-            last_sequence = list(scaled_data[-sequence_length:])
-            n_features = scaled_data.shape[1]
-            
-            predicting_price = current_price
-            
-            for day in range(days):
-                input_seq = np.array(last_sequence[-sequence_length:]).reshape(1, sequence_length, n_features)
-                predicted_scaled = current_model.predict(input_seq, verbose=0)[0][0]
-                
-                # --- Inference Safety Gate (For Returns) ---
-                if predicted_scaled > 5.0 or predicted_scaled < -5.0:
-                    print(f"⚠️ LSTM Sanity Check Failed for {ticker} (scaled return {predicted_scaled:.2f}). Falling back.")
-                    raise ValueError(f"Extreme prediction: {predicted_scaled:.2f}")
+                return payload['predicted_prices']
+            else:
+                print(f"No v5.0 model for {ticker}. Triggering background training...")
+                trigger_background_training()
+        except Exception as engine_err:
+            print(f"Unified Engine v5.0 unavailable for {ticker}: {engine_err}")
+            trigger_background_training()
 
-                # Update sequence for next day (recursive prediction)
-                next_row = list(last_sequence[-1])
-                next_row[0] = predicted_scaled # Update 'returns' col
-                last_sequence.append(next_row)
-                
-                # --- Convert predicted return back to price ---
-                dummy_row = np.zeros((1, n_features))
-                dummy_row[0, 0] = predicted_scaled
-                predicted_return = saved_scaler.inverse_transform(dummy_row)[0][0]
-                
-                # Apply return: P_t+1 = P_t * (1 + return)
-                predicting_price = predicting_price * (1 + predicted_return)
-                
-                # Final check in real price space
-                if predicting_price > current_price * 2.0 or predicting_price < current_price * 0.5:
-                    print(f"⚠️ Extreme price projection for {ticker}: ${predicting_price:.2f}. Falling back.")
-                    raise ValueError("Unrealistic price jump")
-                
-                predictions.append(float(predicting_price))
-            
-            return predictions
-        
-        else:
-            # Strict production behavior: scaler mismatch means model output is unsafe.
-            print(f"⚠️ No scaler found for {ticker}. Returning training-in-progress state.")
-            return []
-        
+        # No model available yet — return empty (frontend shows training state)
+        return []
+
     except Exception as e:
-        print(f"LSTM prediction error: {e}")
+        print(f"Prediction error for {ticker}: {e}")
         return []
 
 def predict_with_technical_analysis(hist, current_price):

@@ -1,16 +1,14 @@
 """
-Unified Engine — Production Inference
-=======================================
-Single entry point for all predictions.
+Unified Engine — Production Inference v5.0
+============================================
+Generates PRICE RANGES (not exact prices) like real trading apps.
+Uses quantile regression for real confidence intervals.
 Enforces feature parity with training via hash verification.
 """
 
 from __future__ import annotations
 
-import json
-import os
-import sys
-import warnings
+import json, os, sys, warnings
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -24,10 +22,8 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from unified_engine.config import CONFIG
-from unified_engine.features import UnifiedFeatureEngine, get_feature_engine
+from unified_engine.features import get_feature_engine
 
-
-# In-memory cache for loaded models
 _MODEL_CACHE: Dict[str, Dict] = {}
 
 
@@ -37,15 +33,12 @@ def _get_artifact_dir(ticker: str) -> Path:
 
 
 def _load_artifact(ticker: str) -> Optional[Dict]:
-    """Load trained model artifact from disk, with in-memory caching."""
     ticker = ticker.upper()
     if ticker in _MODEL_CACHE:
         return _MODEL_CACHE[ticker]
-
     artifact_path = _get_artifact_dir(ticker) / "model.joblib"
     if not artifact_path.exists():
         return None
-
     try:
         artifact = joblib.load(artifact_path)
         _MODEL_CACHE[ticker] = artifact
@@ -56,7 +49,6 @@ def _load_artifact(ticker: str) -> Optional[Dict]:
 
 
 def clear_cache(ticker: Optional[str] = None):
-    """Clear model cache. If ticker is None, clear all."""
     if ticker:
         _MODEL_CACHE.pop(ticker.upper(), None)
     else:
@@ -64,36 +56,14 @@ def clear_cache(ticker: Optional[str] = None):
 
 
 class UnifiedPredictor:
-    """
-    Production inference service.
-    Uses the SAME feature engine as training to guarantee parity.
-    """
+    """Production inference — generates price RANGES like real trading apps."""
 
     @staticmethod
-    def predict(
-        ticker: str,
-        hist: pd.DataFrame,
-        current_price: Optional[float] = None,
-        days: int = 7,
-    ) -> Optional[Dict]:
-        """
-        Generate predictions for a stock.
-
-        Args:
-            ticker: Stock symbol (e.g., 'AAPL')
-            hist: Historical OHLCV DataFrame (at least 200 rows)
-            current_price: Current price (if None, uses last close)
-            days: Number of days to predict ahead
-
-        Returns:
-            Dict with prediction data, or None if model not available
-        """
+    def predict(ticker: str, hist: pd.DataFrame, current_price: Optional[float] = None, days: int = 7) -> Optional[Dict]:
         ticker = ticker.upper()
         artifact = _load_artifact(ticker)
-
         if artifact is None:
             return None
-
         try:
             return _run_inference(ticker, artifact, hist, current_price, days)
         except Exception as e:
@@ -104,13 +74,10 @@ class UnifiedPredictor:
 
     @staticmethod
     def is_model_available(ticker: str) -> bool:
-        """Check if a trained model exists for this ticker."""
-        artifact_path = _get_artifact_dir(ticker.upper()) / "model.joblib"
-        return artifact_path.exists()
+        return (_get_artifact_dir(ticker.upper()) / "model.joblib").exists()
 
     @staticmethod
     def get_model_metadata(ticker: str) -> Optional[Dict]:
-        """Get model metadata without loading the full artifact."""
         metadata_path = _get_artifact_dir(ticker.upper()) / "metadata.json"
         if not metadata_path.exists():
             return None
@@ -120,14 +87,8 @@ class UnifiedPredictor:
             return None
 
 
-def _run_inference(
-    ticker: str,
-    artifact: Dict,
-    hist: pd.DataFrame,
-    current_price: Optional[float],
-    days: int,
-) -> Dict:
-    """Core inference logic."""
+def _run_inference(ticker, artifact, hist, current_price, days):
+    """Core inference — produces price ranges via quantile regression."""
 
     # === STEP 1: Feature computation with SAME engine as training ===
     selected_features = artifact["selected_features"]
@@ -135,31 +96,22 @@ def _run_inference(
     saved_hash = artifact["column_hash"]
 
     engine = get_feature_engine(selected_features=selected_features)
-
-    # Normalize input DataFrame
     hist_clean = _normalize_ohlcv(hist)
-    if len(hist_clean) < 200:
-        raise ValueError(f"Insufficient history: {len(hist_clean)} rows (need 200+)")
 
-    # Compute features using the SAME engine, with the SAVED scaler
-    feature_artifacts = engine.compute(
-        hist_clean,
-        fit_scaler=False,
-        scaler=saved_scaler,
-    )
+    if len(hist_clean) < 100:
+        raise ValueError(f"Insufficient history: {len(hist_clean)} rows (need 100+)")
+
+    feature_artifacts = engine.compute(hist_clean, fit_scaler=False, scaler=saved_scaler)
 
     # === STEP 2: Feature parity check ===
     computed_hash = feature_artifacts.column_hash
     if computed_hash != saved_hash:
         print(f"[INFERENCE] ⚠️ Feature hash mismatch for {ticker}!")
-        print(f"  Training hash: {saved_hash}")
-        print(f"  Inference hash: {computed_hash}")
-        print(f"  Training columns: {artifact['column_order']}")
-        print(f"  Inference columns: {feature_artifacts.column_order}")
-        raise ValueError("Feature parity violation: train/inference features don't match")
+        print(f"  Training: {saved_hash}, Inference: {computed_hash}")
+        raise ValueError("Feature parity violation")
 
     if feature_artifacts.features.empty:
-        raise ValueError("No valid features computed from input data")
+        raise ValueError("No valid features computed")
 
     # === STEP 3: Get latest feature row ===
     X_latest = feature_artifacts.features.iloc[[-1]].values
@@ -167,24 +119,86 @@ def _run_inference(
     # === STEP 4: Model predictions ===
     xgb_model = artifact["xgb_model"]
     lgbm_model = artifact["lgbm_model"]
+    rf_model = artifact.get("rf_model")  # v5.1: may not exist in older artifacts
     meta_learner = artifact["meta_learner"]
     calibrator = artifact["calibrator"]
+    quantile_models = artifact.get("quantile_models", {})
 
-    # XGBoost direction probability
+    # Direction probability
     xgb_prob = float(xgb_model.predict_proba(X_latest)[0, 1])
 
-    # LightGBM magnitude prediction
+    # Magnitude prediction (median)
     lgbm_mag = float(lgbm_model.predict(X_latest)[0])
     lgbm_dir_prob = 1.0 if lgbm_mag > 0 else 0.0
 
-    # Meta-learner ensemble
-    meta_features = np.array([[xgb_prob, lgbm_dir_prob, lgbm_mag]])
+    # v5.1: RandomForest probability
+    rf_prob = float(rf_model.predict_proba(X_latest)[0, 1]) if rf_model is not None else xgb_prob
+
+    # Meta-learner ensemble (must match training meta-features)
+    if rf_model is not None:
+        meta_features = np.array([[
+            xgb_prob, lgbm_dir_prob, rf_prob, lgbm_mag,
+            xgb_prob * rf_prob,                    # interaction
+            abs(xgb_prob - rf_prob),                # disagreement
+        ]])
+    else:
+        # Legacy fallback for older artifacts
+        meta_features = np.array([[xgb_prob, lgbm_dir_prob, lgbm_mag]])
     raw_prob = float(meta_learner.predict_proba(meta_features)[0, 1])
 
     # Calibrate
     direction_prob = float(calibrator.calibrate(np.array([raw_prob]))[0])
 
-    # === STEP 5: Generate signals ===
+    # === STEP 5: Quantile predictions (REAL confidence intervals) ===
+    base_price = current_price if current_price else float(hist_clean["Close"].iloc[-1])
+    total_days = max(1, int(days))
+
+    # Get quantile return predictions
+    q_predictions = {}
+    for alpha, q_model in quantile_models.items():
+        q_return = float(q_model.predict(X_latest)[0])
+        q_predictions[alpha] = q_return
+
+    # Fallback if no quantile models
+    avg_abs_return = artifact.get("avg_abs_return", 0.02)
+    if not q_predictions:
+        expected_return = (direction_prob - 0.5) * 2.0 * avg_abs_return
+        q_predictions = {
+            0.10: expected_return - 2.0 * avg_abs_return,
+            0.25: expected_return - avg_abs_return,
+            0.50: expected_return,
+            0.75: expected_return + avg_abs_return,
+            0.90: expected_return + 2.0 * avg_abs_return,
+        }
+
+    expected_return = q_predictions.get(0.50, lgbm_mag)
+
+    # === STEP 6: Generate price RANGES for each day ===
+    daily_fraction = 1.0 / max(CONFIG.prediction_horizon, 1)
+
+    predicted_prices = []      # median path
+    price_range_low = []       # 10th percentile (bear case)
+    price_range_high = []      # 90th percentile (bull case)
+    price_range_q25 = []       # 25th percentile
+    price_range_q75 = []       # 75th percentile
+
+    for day_num in range(1, total_days + 1):
+        frac = day_num * daily_fraction
+        frac = min(frac, 1.0)
+
+        p_median = base_price * (1.0 + q_predictions.get(0.50, expected_return) * frac)
+        p_low = base_price * (1.0 + q_predictions.get(0.10, expected_return - 0.03) * frac)
+        p_high = base_price * (1.0 + q_predictions.get(0.90, expected_return + 0.03) * frac)
+        p_q25 = base_price * (1.0 + q_predictions.get(0.25, expected_return - 0.01) * frac)
+        p_q75 = base_price * (1.0 + q_predictions.get(0.75, expected_return + 0.01) * frac)
+
+        predicted_prices.append(round(float(p_median), 2))
+        price_range_low.append(round(float(p_low), 2))
+        price_range_high.append(round(float(p_high), 2))
+        price_range_q25.append(round(float(p_q25), 2))
+        price_range_q75.append(round(float(p_q75), 2))
+
+    # === STEP 7: Generate signal ===
     confidence = abs(direction_prob - 0.5) * 2.0
     buy_threshold = artifact.get("buy_threshold", CONFIG.entry_threshold)
     sell_threshold = artifact.get("sell_threshold", CONFIG.exit_threshold)
@@ -196,51 +210,35 @@ def _run_inference(
     else:
         signal = "HOLD"
 
-    # === STEP 6: Price projections ===
-    avg_abs_return = artifact.get("avg_abs_return", 0.02)
-    expected_return = (direction_prob - 0.5) * 2.0 * avg_abs_return
-
-    base_price = current_price if current_price else float(hist_clean["Close"].iloc[-1])
-    total_days = max(1, int(days))
-    daily_return = (1.0 + expected_return) ** (1.0 / max(CONFIG.prediction_horizon, total_days)) - 1.0
-
-    predicted_prices = []
-    price = base_price
-    for _ in range(total_days):
-        price *= (1.0 + daily_return)
-        predicted_prices.append(round(float(price), 2))
-
-    # === STEP 7: Confidence intervals ===
-    uncertainty = max(0.005, avg_abs_return * (1.0 - min(confidence, 0.95)))
-
     # === STEP 8: Build response ===
     metrics = artifact.get("metrics", {})
 
     return {
-        # Core prediction
         "ticker": ticker,
         "prediction": float(expected_return),
-        "lower_95": float(expected_return - 1.96 * uncertainty),
-        "upper_95": float(expected_return + 1.96 * uncertainty),
+        "lower_95": float(q_predictions.get(0.10, expected_return - 0.03)),
+        "upper_95": float(q_predictions.get(0.90, expected_return + 0.03)),
         "confidence": float(confidence),
         "direction_prob": float(direction_prob),
         "signal": signal,
+        # Price ranges (like real trading apps)
+        "predicted_prices": predicted_prices,
+        "price_range_low": price_range_low,
+        "price_range_high": price_range_high,
+        "price_range_q25": price_range_q25,
+        "price_range_q75": price_range_q75,
+        # Quantile returns
+        "quantile_returns": {str(k): float(v) for k, v in q_predictions.items()},
         # Model info
-        "model_version": artifact.get("version", "v4.0"),
-        "model_type": "Unified Ensemble v4.0",
+        "model_version": artifact.get("version", "v5.0"),
+        "model_type": "Unified Ensemble v5.0",
         "features_used": selected_features,
         "column_hash": saved_hash,
-        # Timestamps
         "data_freshness": datetime.utcnow().isoformat() + "Z",
         "trained_at": artifact.get("trained_at", ""),
-        # Drift
         "drift_score": 0.0,
-        # Prices
-        "predicted_prices": predicted_prices,
         "prediction_horizon": CONFIG.prediction_horizon,
-        # Metrics from training
         "metrics": metrics,
-        # Components (for debugging)
         "components": {
             "xgb_prob": float(xgb_prob),
             "lgbm_mag": float(lgbm_mag),
@@ -254,11 +252,9 @@ def _normalize_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
     """Normalize OHLCV DataFrame for consistent processing."""
     data = df.copy()
 
-    # Handle MultiIndex columns
     if isinstance(data.columns, pd.MultiIndex):
         data.columns = data.columns.get_level_values(0)
 
-    # Ensure DatetimeIndex
     if not isinstance(data.index, pd.DatetimeIndex):
         if "Date" in data.columns:
             data["Date"] = pd.to_datetime(data["Date"])
@@ -269,11 +265,9 @@ def _normalize_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
         else:
             data.index = pd.to_datetime(data.index)
 
-    # Remove timezone
     if data.index.tz is not None:
         data.index = data.index.tz_localize(None)
 
-    # Ensure required columns
     required = ["Open", "High", "Low", "Close", "Volume"]
     for col in required:
         if col not in data.columns:
@@ -282,7 +276,6 @@ def _normalize_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
             elif col in ("Open", "High", "Low"):
                 data[col] = data["Close"]
 
-    # Convert to numeric
     for col in required:
         data[col] = pd.to_numeric(data[col], errors="coerce")
 
