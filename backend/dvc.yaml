@@ -8,4 +8,3 @@ stages:
       - train_top5_monitor.py
     outs:
       - unified_engine/models/
-      - monitoring/reports/

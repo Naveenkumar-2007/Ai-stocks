@@ -1,12 +1,12 @@
 {
   "engine_version": "v5.2",
-  "generated_at": "2026-05-03T08:10:56.525140Z",
-  "training_seconds": 914.8,
+  "generated_at": "2026-05-03T10:56:12.578692Z",
+  "training_seconds": 633.0,
   "stocks": [
     {
       "ticker": "AAPL",
       "success": true,
-      "version": "v5.2-20260503-0757",
+      "version": "v5.2-20260503-1046",
       "reason": "trained",
       "metrics": {
         "accuracy": 58.730158730158735,
@@ -21,13 +21,13 @@
         "training_samples": 1459,
         "n_folds": 43
       },
-      "timing_seconds": 94.9,
+      "timing_seconds": 67.2,
       "n_features": 30
     },
     {
       "ticker": "MSFT",
       "success": true,
-      "version": "v5.2-20260503-0758",
+      "version": "v5.2-20260503-1047",
       "reason": "trained",
       "metrics": {
         "accuracy": 57.608695652173914,
@@ -42,13 +42,13 @@
         "training_samples": 1447,
         "n_folds": 42
       },
-      "timing_seconds": 92.1,
+      "timing_seconds": 63.4,
       "n_features": 30
     },
     {
       "ticker": "GOOGL",
       "success": true,
-      "version": "v5.2-20260503-0800",
+      "version": "v5.2-20260503-1048",
       "reason": "trained",
       "metrics": {
         "accuracy": 66.47727272727273,
@@ -63,13 +63,13 @@
         "training_samples": 1414,
         "n_folds": 40
       },
-      "timing_seconds": 85.3,
+      "timing_seconds": 59.4,
       "n_features": 30
     },
     {
       "ticker": "AMZN",
       "success": true,
-      "version": "v5.2-20260503-0801",
+      "version": "v5.2-20260503-1049",
       "reason": "trained",
       "metrics": {
         "accuracy": 57.55813953488372,
@@ -84,13 +84,13 @@
         "training_samples": 1385,
         "n_folds": 39
       },
-      "timing_seconds": 82.2,
+      "timing_seconds": 56.9,
       "n_features": 30
     },
     {
       "ticker": "NVDA",
       "success": true,
-      "version": "v5.2-20260503-0803",
+      "version": "v5.2-20260503-1051",
       "reason": "trained",
       "metrics": {
         "accuracy": 61.41304347826087,
@@ -105,13 +105,13 @@
         "training_samples": 1452,
         "n_folds": 42
       },
-      "timing_seconds": 127.1,
+      "timing_seconds": 100.0,
       "n_features": 30
     },
     {
       "ticker": "RELIANCE.NS",
       "success": true,
-      "version": "v5.2-20260503-0805",
+      "version": "v5.2-20260503-1051",
       "reason": "trained",
       "metrics": {
         "accuracy": 55.434782608695656,
@@ -126,13 +126,13 @@
         "training_samples": 976,
         "n_folds": 20
       },
-      "timing_seconds": 90.3,
+      "timing_seconds": 32.3,
       "n_features": 30
     },
     {
       "ticker": "TCS.NS",
       "success": true,
-      "version": "v5.2-20260503-0806",
+      "version": "v5.2-20260503-1052",
       "reason": "trained",
       "metrics": {
         "accuracy": 61.36363636363637,
@@ -147,13 +147,13 @@
         "training_samples": 959,
         "n_folds": 19
       },
-      "timing_seconds": 86.2,
+      "timing_seconds": 29.1,
       "n_features": 30
     },
     {
       "ticker": "INFY.NS",
       "success": true,
-      "version": "v5.2-20260503-0808",
+      "version": "v5.2-20260503-1052",
       "reason": "trained",
       "metrics": {
         "accuracy": 68.18181818181817,
@@ -168,13 +168,13 @@
         "training_samples": 966,
         "n_folds": 19
       },
-      "timing_seconds": 90.8,
+      "timing_seconds": 29.5,
       "n_features": 30
     },
     {
       "ticker": "TSLA",
       "success": true,
-      "version": "v5.2-20260503-0809",
+      "version": "v5.2-20260503-1054",
       "reason": "trained",
       "metrics": {
         "accuracy": 51.70454545454546,
@@ -189,13 +189,13 @@
         "training_samples": 1409,
         "n_folds": 40
       },
-      "timing_seconds": 83.6,
+      "timing_seconds": 114.6,
       "n_features": 30
     },
     {
       "ticker": "META",
       "success": true,
-      "version": "v5.2-20260503-0810",
+      "version": "v5.2-20260503-1056",
       "reason": "trained",
       "metrics": {
         "accuracy": 51.70454545454546,
@@ -210,7 +210,7 @@
         "training_samples": 1398,
         "n_folds": 40
       },
-      "timing_seconds": 82.3,
+      "timing_seconds": 80.6,
       "n_features": 30
     }
   ]

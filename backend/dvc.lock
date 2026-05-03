@@ -1,0 +1,27 @@
+schema: '2.0'
+stages:
+  train_unified_models:
+    cmd: python train_top5_monitor.py
+    deps:
+    - path: train_top5_monitor.py
+      hash: md5
+      md5: e17cfb5a73ab91ee9b146f0139dfb23a
+      size: 17783
+    - path: unified_engine/features.py
+      hash: md5
+      md5: 66d1e47d6931945a5373babceb3f8b86
+      size: 18229
+    - path: unified_engine/inference.py
+      hash: md5
+      md5: 0a36bccdb21dfa40e6b1e10f817a9b20
+      size: 11239
+    - path: unified_engine/training.py
+      hash: md5
+      md5: cf4c163ec397c6e2fe696afe34ff5dd5
+      size: 22314
+    outs:
+    - path: unified_engine/models/
+      hash: md5
+      md5: d9c6881feaa342ab434e13ce2959a356.dir
+      size: 58929968
+      nfiles: 20
