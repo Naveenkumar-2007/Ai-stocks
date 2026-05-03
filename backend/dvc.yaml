@@ -1,0 +1,11 @@
+stages:
+  train_unified_models:
+    cmd: python train_top5_monitor.py
+    deps:
+      - unified_engine/training.py
+      - unified_engine/inference.py
+      - unified_engine/features.py
+      - train_top5_monitor.py
+    outs:
+      - unified_engine/models/
+      - monitoring/reports/
