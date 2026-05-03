@@ -1,0 +1,217 @@
+{
+  "engine_version": "v5.2",
+  "generated_at": "2026-05-03T08:10:56.525140Z",
+  "training_seconds": 914.8,
+  "stocks": [
+    {
+      "ticker": "AAPL",
+      "success": true,
+      "version": "v5.2-20260503-0757",
+      "reason": "trained",
+      "metrics": {
+        "accuracy": 58.730158730158735,
+        "precision": 58.730158730158735,
+        "recall": 100.0,
+        "f1": 74.0,
+        "auc": 0.5184800184800185,
+        "binom_pvalue": 0.009844172802678007,
+        "fold_mean_accuracy": 55.777039497969724,
+        "fold_std_accuracy": 12.543263131081458,
+        "calibration_samples": 189,
+        "training_samples": 1459,
+        "n_folds": 43
+      },
+      "timing_seconds": 94.9,
+      "n_features": 30
+    },
+    {
+      "ticker": "MSFT",
+      "success": true,
+      "version": "v5.2-20260503-0758",
+      "reason": "trained",
+      "metrics": {
+        "accuracy": 57.608695652173914,
+        "precision": 57.608695652173914,
+        "recall": 100.0,
+        "f1": 73.10344827586206,
+        "auc": 0.5671262699564588,
+        "binom_pvalue": 0.02312236402107461,
+        "fold_mean_accuracy": 55.70672713529855,
+        "fold_std_accuracy": 12.721113136588688,
+        "calibration_samples": 184,
+        "training_samples": 1447,
+        "n_folds": 42
+      },
+      "timing_seconds": 92.1,
+      "n_features": 30
+    },
+    {
+      "ticker": "GOOGL",
+      "success": true,
+      "version": "v5.2-20260503-0800",
+      "reason": "trained",
+      "metrics": {
+        "accuracy": 66.47727272727273,
+        "precision": 66.47727272727273,
+        "recall": 100.0,
+        "f1": 79.86348122866895,
+        "auc": 0.4835578733883819,
+        "binom_pvalue": 7.338573042126825e-06,
+        "fold_mean_accuracy": 53.96825396825397,
+        "fold_std_accuracy": 12.104150363997697,
+        "calibration_samples": 176,
+        "training_samples": 1414,
+        "n_folds": 40
+      },
+      "timing_seconds": 85.3,
+      "n_features": 30
+    },
+    {
+      "ticker": "AMZN",
+      "success": true,
+      "version": "v5.2-20260503-0801",
+      "reason": "trained",
+      "metrics": {
+        "accuracy": 57.55813953488372,
+        "precision": 57.55813953488372,
+        "recall": 100.0,
+        "f1": 73.06273062730627,
+        "auc": 0.5685623356856234,
+        "binom_pvalue": 0.02815183403440411,
+        "fold_mean_accuracy": 49.979649979649984,
+        "fold_std_accuracy": 10.392307300113583,
+        "calibration_samples": 172,
+        "training_samples": 1385,
+        "n_folds": 39
+      },
+      "timing_seconds": 82.2,
+      "n_features": 30
+    },
+    {
+      "ticker": "NVDA",
+      "success": true,
+      "version": "v5.2-20260503-0803",
+      "reason": "trained",
+      "metrics": {
+        "accuracy": 61.41304347826087,
+        "precision": 61.41304347826087,
+        "recall": 100.0,
+        "f1": 76.0942760942761,
+        "auc": 0.5299763180855042,
+        "binom_pvalue": 0.001207078842000573,
+        "fold_mean_accuracy": 57.105064247921376,
+        "fold_std_accuracy": 13.250870210783855,
+        "calibration_samples": 184,
+        "training_samples": 1452,
+        "n_folds": 42
+      },
+      "timing_seconds": 127.1,
+      "n_features": 30
+    },
+    {
+      "ticker": "RELIANCE.NS",
+      "success": true,
+      "version": "v5.2-20260503-0805",
+      "reason": "trained",
+      "metrics": {
+        "accuracy": 55.434782608695656,
+        "precision": 55.434782608695656,
+        "recall": 100.0,
+        "f1": 71.32867132867133,
+        "auc": 0.6690578670492586,
+        "binom_pvalue": 0.17407064515960294,
+        "fold_mean_accuracy": 53.73015873015873,
+        "fold_std_accuracy": 12.49111551232525,
+        "calibration_samples": 92,
+        "training_samples": 976,
+        "n_folds": 20
+      },
+      "timing_seconds": 90.3,
+      "n_features": 30
+    },
+    {
+      "ticker": "TCS.NS",
+      "success": true,
+      "version": "v5.2-20260503-0806",
+      "reason": "trained",
+      "metrics": {
+        "accuracy": 61.36363636363637,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "auc": 0.5490196078431373,
+        "binom_pvalue": 0.021105305811202086,
+        "fold_mean_accuracy": 43.94319131161237,
+        "fold_std_accuracy": 10.62990232575939,
+        "calibration_samples": 88,
+        "training_samples": 959,
+        "n_folds": 19
+      },
+      "timing_seconds": 86.2,
+      "n_features": 30
+    },
+    {
+      "ticker": "INFY.NS",
+      "success": true,
+      "version": "v5.2-20260503-0808",
+      "reason": "trained",
+      "metrics": {
+        "accuracy": 68.18181818181817,
+        "precision": 66.0,
+        "recall": 75.0,
+        "f1": 70.2127659574468,
+        "auc": 0.6900826446280992,
+        "binom_pvalue": 0.0004232480428083375,
+        "fold_mean_accuracy": 58.56307435254803,
+        "fold_std_accuracy": 13.148808043809005,
+        "calibration_samples": 88,
+        "training_samples": 966,
+        "n_folds": 19
+      },
+      "timing_seconds": 90.8,
+      "n_features": 30
+    },
+    {
+      "ticker": "TSLA",
+      "success": true,
+      "version": "v5.2-20260503-0809",
+      "reason": "trained",
+      "metrics": {
+        "accuracy": 51.70454545454546,
+        "precision": 51.70454545454546,
+        "recall": 100.0,
+        "f1": 68.16479400749064,
+        "auc": 0.5093729799612152,
+        "binom_pvalue": 0.3531854201311705,
+        "fold_mean_accuracy": 51.547619047619044,
+        "fold_std_accuracy": 10.742100873038789,
+        "calibration_samples": 176,
+        "training_samples": 1409,
+        "n_folds": 40
+      },
+      "timing_seconds": 83.6,
+      "n_features": 30
+    },
+    {
+      "ticker": "META",
+      "success": true,
+      "version": "v5.2-20260503-0810",
+      "reason": "trained",
+      "metrics": {
+        "accuracy": 51.70454545454546,
+        "precision": 51.70454545454546,
+        "recall": 100.0,
+        "f1": 68.16479400749064,
+        "auc": 0.507563025210084,
+        "binom_pvalue": 0.3531854201311705,
+        "fold_mean_accuracy": 50.75396825396825,
+        "fold_std_accuracy": 14.458773199997973,
+        "calibration_samples": 176,
+        "training_samples": 1398,
+        "n_folds": 40
+      },
+      "timing_seconds": 82.3,
+      "n_features": 30
+    }
+  ]
+}

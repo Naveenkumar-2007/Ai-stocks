@@ -22,7 +22,6 @@ backend/mlruns/
 backend/logs/
 backend/cache/
 backend/artifacts/
-backend/monitoring/reports/
 backend/monitoring/tuning/
 backend/data/raw/
 backend/data/processed/
@@ -74,7 +73,6 @@ backend/unified_engine/_prediction_logs/
 backend/v36_training_results.json
 backend/local_custom_training_results.json
 backend/train_local_custom.py
-backend/charts/*.png
 # Runtime generated
 backend/build/
 backend/data/ai_stocks.db
