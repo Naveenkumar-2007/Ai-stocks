@@ -131,11 +131,22 @@ def _run_inference(ticker, artifact, hist, current_price, days):
     lgbm_mag = float(lgbm_model.predict(X_latest)[0])
     lgbm_dir_prob = 1.0 if lgbm_mag > 0 else 0.0
 
-    # v5.1: RandomForest probability
+    # v5.2: Dual XGBoost + RandomForest probability
+    xgb_model_2 = artifact.get("xgb_model_2")
+    xgb2_prob = float(xgb_model_2.predict_proba(X_latest)[0, 1]) if xgb_model_2 is not None else xgb_prob
     rf_prob = float(rf_model.predict_proba(X_latest)[0, 1]) if rf_model is not None else xgb_prob
 
     # Meta-learner ensemble (must match training meta-features)
-    if rf_model is not None:
+    if xgb_model_2 is not None and rf_model is not None:
+        # v5.2 features
+        meta_features = np.array([[
+            xgb_prob, xgb2_prob, lgbm_dir_prob, rf_prob, lgbm_mag,
+            xgb_prob * rf_prob,                     # interaction 1
+            xgb2_prob * rf_prob,                    # interaction 2
+            abs(xgb_prob - rf_prob),                # disagreement
+        ]])
+    elif rf_model is not None:
+        # v5.1 features
         meta_features = np.array([[
             xgb_prob, lgbm_dir_prob, rf_prob, lgbm_mag,
             xgb_prob * rf_prob,                    # interaction

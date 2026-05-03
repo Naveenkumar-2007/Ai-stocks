@@ -467,6 +467,33 @@ def train_unified_model(ticker: str, generate_charts: bool = False) -> TrainResu
     print(f"  ✅ Version: {model_version}")
     print(f"  ✅ Accuracy: {accuracy*100:.1f}%  |  AUC: {auc:.3f}")
 
+    # Track in MLflow if available
+    try:
+        import mlflow
+        from mlops.config import MLOpsConfig
+        if MLOpsConfig.MLFLOW_TRACKING_URI:
+            mlflow.set_tracking_uri(MLOpsConfig.MLFLOW_TRACKING_URI)
+            mlflow.set_experiment("Unified_Engine_v5.2")
+            with mlflow.start_run(run_name=f"{ticker}_{model_version}"):
+                mlflow.log_params({
+                    "ticker": ticker,
+                    "engine_version": "v5.2",
+                    "n_features": len(selected),
+                    "training_samples": len(hist_clean),
+                    "scale_pos_weight": float(scale_pos_weight)
+                })
+                mlflow.log_metrics({
+                    "accuracy": float(accuracy),
+                    "f1_score": float(f1),
+                    "auc": float(auc),
+                    "binom_pvalue": float(binom_pvalue),
+                    "fold_mean_acc": float(fold_mean)
+                })
+                mlflow.log_artifact(str(artifact_path), "unified_model")
+                print(f"  ✅ MLflow: Logged run for {ticker}")
+    except Exception as e:
+        print(f"  ⚠️ MLflow logging skipped/failed: {e}")
+
     return TrainResult(
         ticker=ticker, success=True, metrics=artifact["metrics"],
         fold_results=fold_results, feature_importance=importance,
