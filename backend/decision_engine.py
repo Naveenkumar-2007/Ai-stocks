@@ -379,18 +379,43 @@ def signal_for_forecast_row(
     """Create horizon-row labels without contradicting the final decision."""
     if base_price <= 0:
         return "HOLD"
+
+    final_signal = final_decision.signal
+    if final_signal == "HOLD":
+        return "HOLD"
+
     change_pct = ((predicted_price - base_price) / base_price) * 100.0
     min_move = final_decision.min_required_move_pct
     confidence = final_decision.confidence
     score = final_decision.score
 
-    if abs(change_pct) < min_move or confidence < 0.38:
+    if confidence < 0.38:
         return "HOLD"
-    if change_pct > 0 and score > 0:
+
+    is_buy_decision = final_signal.endswith("BUY")
+    is_sell_decision = final_signal.endswith("SELL")
+    row_agrees = (
+        (is_buy_decision and change_pct > 0 and score > 0)
+        or (is_sell_decision and change_pct < 0 and score < 0)
+    )
+
+    if not row_agrees:
+        return "HOLD"
+
+    # If the final fused decision is directional, a same-direction row should
+    # not be downgraded to HOLD only because its midpoint is inside the
+    # single-row friction band. The range columns already show uncertainty.
+    if abs(change_pct) < min_move:
+        enough_row_edge = abs(change_pct) >= min_move * 0.25 or confidence >= 0.50
+        if not enough_row_edge:
+            return "HOLD"
+        return "BUY" if is_buy_decision else "SELL"
+
+    if is_buy_decision:
         if change_pct >= min_move * 2.5 and confidence >= 0.70:
             return "STRONG BUY"
         return "BUY"
-    if change_pct < 0 and score < 0:
+    if is_sell_decision:
         if abs(change_pct) >= min_move * 2.5 and confidence >= 0.70:
             return "STRONG SELL"
         return "SELL"

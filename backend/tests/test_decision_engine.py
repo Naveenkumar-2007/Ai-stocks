@@ -8,6 +8,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from decision_engine import build_decision, signal_for_forecast_row
+from decision_engine import DecisionResult
 
 
 def make_history(days=90, start=100.0, drift=0.0005, vol=0.01):
@@ -177,6 +178,56 @@ class DecisionEngineTests(unittest.TestCase):
 
         self.assertEqual(decision.signal, "HOLD")
         self.assertIn("Validation quality", " ".join(decision.reasons))
+
+    def test_forecast_row_inherits_aligned_final_buy_inside_friction_band(self):
+        decision = DecisionResult(
+            signal="BUY",
+            stance="Bullish",
+            confidence=0.54,
+            score=0.22,
+            expected_move_pct=0.70,
+            min_required_move_pct=0.57,
+            risk_adjusted_quality=0.50,
+            uncertainty="medium",
+            reasons=["Prediction interval crosses zero, so directional edge is uncertain."],
+            components={},
+            thresholds={},
+            risk={},
+        )
+
+        self.assertEqual(
+            signal_for_forecast_row(
+                base_price=294.08,
+                predicted_price=294.80,
+                final_decision=decision,
+            ),
+            "BUY",
+        )
+
+    def test_forecast_row_blocks_opposite_direction_to_final_buy(self):
+        decision = DecisionResult(
+            signal="BUY",
+            stance="Bullish",
+            confidence=0.62,
+            score=0.30,
+            expected_move_pct=0.80,
+            min_required_move_pct=0.50,
+            risk_adjusted_quality=0.58,
+            uncertainty="medium",
+            reasons=[],
+            components={},
+            thresholds={},
+            risk={},
+        )
+
+        self.assertEqual(
+            signal_for_forecast_row(
+                base_price=100.0,
+                predicted_price=99.6,
+                final_decision=decision,
+            ),
+            "HOLD",
+        )
 
 
 if __name__ == "__main__":
