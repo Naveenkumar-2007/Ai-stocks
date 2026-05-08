@@ -33,8 +33,8 @@ class UnifiedConfig:
     # -------------------------------------------------------------------------
     # Prediction
     # -------------------------------------------------------------------------
-    prediction_horizon: int = 5       # 5 trading days forward
-    prediction_days_ui: int = 7       # max UI prediction days
+    prediction_horizon: int = 14      # 14 trading days forward
+    prediction_days_ui: int = 14      # supported UI max: 1, 7, or 14 days
 
     # -------------------------------------------------------------------------
     # Target Construction (NEW: volatility-adjusted thresholds)
@@ -48,8 +48,8 @@ class UnifiedConfig:
     wf_min_train_days: int = 504      # 2 years minimum training window
     wf_test_window: int = 63          # 3 months test per fold
     wf_step_size: int = 21            # 1 month step
-    wf_purge_days: int = 10           # 2× prediction horizon — prevents leakage
-    wf_embargo_days: int = 5          # extra gap after test window
+    wf_purge_days: int = 28           # 2x prediction horizon prevents leakage
+    wf_embargo_days: int = 14         # extra gap after test window
     wf_min_folds: int = 3             # minimum folds required
 
     # -------------------------------------------------------------------------
@@ -68,7 +68,7 @@ class UnifiedConfig:
         "scale_pos_weight": 1.0,
         "eval_metric": "logloss",
         "random_state": 42,
-        "n_jobs": -1,
+        "n_jobs": 1,
     })
 
     # -------------------------------------------------------------------------
@@ -85,7 +85,7 @@ class UnifiedConfig:
         "min_child_samples": 25,
         "verbose": -1,
         "random_state": 42,
-        "n_jobs": -1,
+        "n_jobs": 1,
     })
 
     # -------------------------------------------------------------------------
@@ -103,7 +103,7 @@ class UnifiedConfig:
         "min_child_samples": 25,
         "verbose": -1,
         "random_state": 42,
-        "n_jobs": -1,
+        "n_jobs": 1,
     })
 
     # -------------------------------------------------------------------------
@@ -130,6 +130,12 @@ class UnifiedConfig:
     entry_threshold: float = 0.55
     exit_threshold: float = 0.45
     strong_signal_confidence: float = 0.60
+    threshold_search_low: float = 0.50
+    threshold_search_high: float = 0.70
+    threshold_search_step: float = 0.01
+    threshold_sell_low: float = 0.30
+    threshold_sell_high: float = 0.50
+    quantile_blend_weight: float = 0.70
 
     # -------------------------------------------------------------------------
     # Risk

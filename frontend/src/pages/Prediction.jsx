@@ -9,6 +9,14 @@ import {
 import { useAuth } from '../contexts/AuthContext';
 
 const API_BASE = process.env.REACT_APP_API_URL || (process.env.NODE_ENV === 'production' ? '' : 'http://localhost:8000');
+const FORECAST_HORIZONS = [1, 7, 14];
+
+const normalizeForecastDays = (value) => {
+  const numeric = Number(value);
+  if (numeric <= 1) return 1;
+  if (numeric <= 7) return 7;
+  return 14;
+};
 
 // Helper function to track user stats
 const trackUserStats = (userEmail, ticker) => {
@@ -305,7 +313,13 @@ const TradingViewStyleChart = ({ candles = [], sma20 = [], predictions = [], isP
   visibleCandles.forEach((c) => { const v = smaByDate.get(c.date); if (Number.isFinite(v)) priceValues.push(v); });
   // Only include future points in price range if we're at the end
   const atEnd = effectiveStart + viewCount >= allValid.length;
-  if (atEnd) futurePoints.forEach((p) => priceValues.push(Number(p.price)));
+  if (atEnd) {
+    futurePoints.forEach((p) => {
+      priceValues.push(Number(p.price));
+      if (Number.isFinite(Number(p.range_low))) priceValues.push(Number(p.range_low));
+      if (Number.isFinite(Number(p.range_high))) priceValues.push(Number(p.range_high));
+    });
+  }
 
   const minPrice = Math.min(...priceValues);
   const maxPrice = Math.max(...priceValues);
@@ -403,6 +417,21 @@ const TradingViewStyleChart = ({ candles = [], sma20 = [], predictions = [], isP
        ...futurePoints.map((p, i) => `L ${xForIndex(visibleCandles.length + i).toFixed(1)} ${yForPrice(p.price).toFixed(1)}`)
       ].join(' ')
     : '';
+  const rangeBandPath = atEnd && futurePoints.some((p) => Number.isFinite(Number(p.range_low)) && Number.isFinite(Number(p.range_high)))
+    ? [
+        `M ${xForIndex(visibleCandles.length - 1).toFixed(1)} ${yForPrice(visibleCandles[visibleCandles.length - 1].close).toFixed(1)}`,
+        ...futurePoints.map((p, i) => {
+          const high = Number.isFinite(Number(p.range_high)) ? Number(p.range_high) : Number(p.price);
+          return `L ${xForIndex(visibleCandles.length + i).toFixed(1)} ${yForPrice(high).toFixed(1)}`;
+        }),
+        ...[...futurePoints].reverse().map((p, reverseIndex) => {
+          const originalIndex = futurePoints.length - 1 - reverseIndex;
+          const low = Number.isFinite(Number(p.range_low)) ? Number(p.range_low) : Number(p.price);
+          return `L ${xForIndex(visibleCandles.length + originalIndex).toFixed(1)} ${yForPrice(low).toFixed(1)}`;
+        }),
+        'Z'
+      ].join(' ')
+    : '';
 
   // Scrollbar
   const scrollBarWidth = plotWidth;
@@ -446,6 +475,10 @@ const TradingViewStyleChart = ({ candles = [], sma20 = [], predictions = [], isP
             <stop offset="0%" stopColor={isProfit ? '#10b981' : '#ef4444'} stopOpacity="0.8" />
             <stop offset="100%" stopColor={isProfit ? '#10b981' : '#ef4444'} stopOpacity="0.3" />
           </linearGradient>
+          <linearGradient id="tvRangeBandGrad" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stopColor={isProfit ? '#10b981' : '#ef4444'} stopOpacity="0.16" />
+            <stop offset="100%" stopColor={isProfit ? '#10b981' : '#ef4444'} stopOpacity="0.08" />
+          </linearGradient>
         </defs>
 
         {/* Background */}
@@ -487,6 +520,7 @@ const TradingViewStyleChart = ({ candles = [], sma20 = [], predictions = [], isP
             );
           })}
           {smaPath && <path d={smaPath} fill="none" stroke="#f59e0b" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" opacity="0.8" />}
+          {rangeBandPath && <path d={rangeBandPath} fill="url(#tvRangeBandGrad)" stroke="none" />}
           {predPath && <path d={predPath} fill="none" stroke="url(#tvPredGrad)" strokeWidth="2.5" strokeDasharray="6 5" strokeLinecap="round" strokeLinejoin="round" />}
         </g>
 
@@ -536,7 +570,7 @@ const TradingViewStyleChart = ({ candles = [], sma20 = [], predictions = [], isP
           {predPath && (
             <>
               <line x1="166" x2="184" y1="4" y2="4" stroke={isProfit ? '#10b981' : '#ef4444'} strokeWidth="2.5" strokeDasharray="4 3" />
-              <text x="188" y="8" fill="#64748b" fontSize="10" fontWeight="600">AI Prediction</text>
+              <text x="188" y="8" fill="#64748b" fontSize="10" fontWeight="600">AI Range</text>
             </>
           )}
         </g>
@@ -576,7 +610,7 @@ function Prediction() {
   const { currentUser } = useAuth();
 
   const [ticker, setTicker] = useState('');
-  const [days, setDays] = useState(() => Number(localStorage.getItem('prediction_days')) || 7);
+  const [days, setDays] = useState(() => normalizeForecastDays(localStorage.getItem('prediction_days') || 7));
   const [stockData, setStockData] = useState(null);
   const currencySymbol = getCurrencySymbol(stockData?.currency);
   const [sentiment, setSentiment] = useState(null);
@@ -776,7 +810,7 @@ function Prediction() {
   };
 
   const fetchStockData = async (symbol, options = {}) => {
-    const { trackStats = true, silent = false } = options;
+    const { trackStats = true, silent = false, overrideDays = days } = options;
     if (!silent) setLoading(true);
     setError(null);
     const headers = {};
@@ -791,7 +825,7 @@ function Prediction() {
 
     try {
       const [stockRes, sentimentRes, newsRes] = await Promise.all([
-        axios.get(`${API_BASE}/api/stock/${symbol}?days=${days}`, { headers, timeout: 120000 }),
+        axios.get(`${API_BASE}/api/stock/${symbol}?days=${normalizeForecastDays(overrideDays)}`, { headers, timeout: 120000 }),
         axios.get(`${API_BASE}/api/sentiment/${symbol}`, { timeout: 15000 }).catch(() => ({ data: { sentiment: null } })),
         axios.get(`${API_BASE}/api/news/${symbol}?days=7`, { timeout: 15000 }).catch(() => ({ data: { news: [] } }))
       ]);
@@ -873,6 +907,14 @@ function Prediction() {
     setVisibleNewsCount(prev => prev + 5);
   };
 
+  const handleDaysChange = (value) => {
+    const nextDays = normalizeForecastDays(value);
+    setDays(nextDays);
+    if (stockData?.ticker) {
+      fetchStockData(stockData.ticker, { trackStats: false, silent: true, overrideDays: nextDays });
+    }
+  };
+
   const computePredictionRows = () => {
     if (!stockData?.future_predictions || !Array.isArray(stockData.future_predictions)) {
       return [];
@@ -890,47 +932,67 @@ function Prediction() {
         return null;
       }
 
-      const change = price - baseline;
-      const changePercent = (change / baseline) * 100;
-
       const minMove = Number(entry?.min_required_move_pct ?? stockData?.recommendation?.min_required_move_pct ?? 0.35);
       const confidence = Number(entry?.confidence ?? stockData?.recommendation?.confidence ?? 0);
       let signal = entry?.signal || 'HOLD';
 
+      const lowNumber = rangeLow[index] != null ? Number(rangeLow[index]) : Number(entry?.range_low ?? NaN);
+      const highNumber = rangeHigh[index] != null ? Number(rangeHigh[index]) : Number(entry?.range_high ?? NaN);
+      const hasRange = Number.isFinite(lowNumber) && Number.isFinite(highNumber);
+      const priceLowNumber = hasRange ? Math.min(lowNumber, highNumber, price) : NaN;
+      const priceHighNumber = hasRange ? Math.max(lowNumber, highNumber, price) : NaN;
+      const midpoint = hasRange ? (priceLowNumber + priceHighNumber) / 2 : price;
+      const midpointChangePercent = ((midpoint - baseline) / baseline) * 100;
+
       if (!entry?.signal) {
         const finalSignal = stockData?.recommendation?.signal || stockData?.ai_signal || 'HOLD';
         const finalScore = Number(stockData?.recommendation?.score ?? 0);
-        if (confidence >= 0.38 && Math.abs(changePercent) >= minMove) {
-          if (changePercent > 0 && finalScore > 0 && finalSignal.includes('BUY')) {
-            signal = confidence >= 0.7 && changePercent >= minMove * 2.5 ? 'STRONG BUY' : 'BUY';
-          } else if (changePercent < 0 && finalScore < 0 && finalSignal.includes('SELL')) {
-            signal = confidence >= 0.7 && Math.abs(changePercent) >= minMove * 2.5 ? 'STRONG SELL' : 'SELL';
+        if (confidence >= 0.38 && Math.abs(midpointChangePercent) >= minMove) {
+          if (midpointChangePercent > 0 && finalScore > 0 && finalSignal.includes('BUY')) {
+            signal = confidence >= 0.7 && midpointChangePercent >= minMove * 2.5 ? 'STRONG BUY' : 'BUY';
+          } else if (midpointChangePercent < 0 && finalScore < 0 && finalSignal.includes('SELL')) {
+            signal = confidence >= 0.7 && Math.abs(midpointChangePercent) >= minMove * 2.5 ? 'STRONG SELL' : 'SELL';
           }
         }
       }
 
       // Price range from quantile regression
-      const priceLow = rangeLow[index] != null ? Number(rangeLow[index]).toFixed(2) : null;
-      const priceHigh = rangeHigh[index] != null ? Number(rangeHigh[index]).toFixed(2) : null;
+      const priceLow = hasRange ? priceLowNumber.toFixed(2) : null;
+      const priceHigh = hasRange ? priceHighNumber.toFixed(2) : null;
       const priceQ25 = rangeQ25[index] != null ? Number(rangeQ25[index]).toFixed(2) : null;
       const priceQ75 = rangeQ75[index] != null ? Number(rangeQ75[index]).toFixed(2) : null;
+      const changeLow = hasRange ? priceLowNumber - baseline : price - baseline;
+      const changeHigh = hasRange ? priceHighNumber - baseline : price - baseline;
+      const changePctLow = (changeLow / baseline) * 100;
+      const changePctHigh = (changeHigh / baseline) * 100;
 
       return {
         id: `${entry.date}-${index}`,
         dateLabel: new Date(entry.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
-        price: price.toFixed(2),
         priceLow,
         priceHigh,
         priceQ25,
         priceQ75,
-        change: change.toFixed(2),
-        changePercent: changePercent.toFixed(2),
+        changeLow: changeLow.toFixed(2),
+        changeHigh: changeHigh.toFixed(2),
+        changePctLow: changePctLow.toFixed(2),
+        changePctHigh: changePctHigh.toFixed(2),
         signal
       };
     }).filter(Boolean);
   };
 
   const predictionRows = computePredictionRows();
+  const selectedRangeIndex = stockData?.price_range_low?.length
+    ? Math.min(days === 1 ? 0 : 4, stockData.price_range_low.length - 1)
+    : -1;
+  const selectedRangeLow = selectedRangeIndex >= 0 ? Number(stockData.price_range_low?.[selectedRangeIndex]) : NaN;
+  const selectedRangeHigh = selectedRangeIndex >= 0 ? Number(stockData.price_range_high?.[selectedRangeIndex]) : NaN;
+  const hasSelectedRange = Number.isFinite(selectedRangeLow) && Number.isFinite(selectedRangeHigh) && Number.isFinite(Number(stockData?.current_price));
+  const selectedRangeChangeLow = hasSelectedRange ? Math.min(selectedRangeLow, selectedRangeHigh) - Number(stockData.current_price) : NaN;
+  const selectedRangeChangeHigh = hasSelectedRange ? Math.max(selectedRangeLow, selectedRangeHigh) - Number(stockData.current_price) : NaN;
+  const selectedRangePctLow = hasSelectedRange ? (selectedRangeChangeLow / Number(stockData.current_price)) * 100 : NaN;
+  const selectedRangePctHigh = hasSelectedRange ? (selectedRangeChangeHigh / Number(stockData.current_price)) * 100 : NaN;
   const finalRecommendation = stockData?.recommendation || {};
   const headlineSignal = finalRecommendation.signal || stockData?.ai_signal || 'HOLD';
   const headlineStance = finalRecommendation.stance || headlineSignal;
@@ -1040,13 +1102,14 @@ function Prediction() {
                   </div>
                   <select
                     value={days}
-                    onChange={(e) => setDays(Number(e.target.value))}
+                    onChange={(e) => handleDaysChange(e.target.value)}
                     className="w-full pl-14 pr-10 py-5 text-lg border-2 border-gray-200 dark:border-gray-700 bg-white/50 dark:bg-gray-900/50 text-gray-900 dark:text-white rounded-2xl focus:ring-4 focus:ring-cyan-500/20 focus:border-cyan-500 shadow-inner appearance-none cursor-pointer transition-all"
                   >
-                    <option value={1}>1 Day Forecast</option>
-                    <option value={7}>7 Days Forecast</option>
-                    <option value={14}>14 Days Forecast</option>
-                    <option value={30}>30 Days Forecast</option>
+                    {FORECAST_HORIZONS.map((horizon) => (
+                      <option key={horizon} value={horizon}>
+                        {horizon === 1 ? '1 Day Forecast' : `${horizon} Days Forecast`}
+                      </option>
+                    ))}
                   </select>
                 </div>
               </div>
@@ -1202,13 +1265,14 @@ function Prediction() {
             </div>
             <select
               value={days}
-              onChange={(e) => setDays(Number(e.target.value))}
+              onChange={(e) => handleDaysChange(e.target.value)}
               className="w-full sm:w-auto px-4 py-3 border-2 border-gray-300 dark:border-dark-border bg-white dark:bg-dark-elevated text-gray-900 dark:text-white rounded-lg focus:ring-2 focus:ring-cyan-500 text-base sm:text-lg touch-target"
             >
-              <option value={1}>1 Day</option>
-              <option value={7}>7 Days</option>
-              <option value={14}>14 Days</option>
-              <option value={30}>30 Days</option>
+              {FORECAST_HORIZONS.map((horizon) => (
+                <option key={horizon} value={horizon}>
+                  {horizon === 1 ? '1 Day' : `${horizon} Days`}
+                </option>
+              ))}
             </select>
             <button
               type="submit"
@@ -1372,36 +1436,49 @@ function Prediction() {
               <div className="bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-500/10 dark:to-blue-600/10 p-3 sm:p-4 rounded-xl border border-blue-200 dark:border-blue-500/20">
                 <p className="text-xs sm:text-sm text-blue-700 dark:text-blue-400 font-medium flex items-center gap-1">
                   <TrendingUp className="w-3 h-3 sm:w-4 sm:h-4" />
-                  <span className="truncate">Price Range (5D)</span>
+                  <span className="truncate">Price Range ({days}D)</span>
                 </p>
                 {stockData.price_range_low?.length > 0 && stockData.price_range_high?.length > 0 ? (
                   <>
                     <p className="text-lg sm:text-xl lg:text-2xl font-bold text-gray-900 dark:text-white mt-1">
-                      ${Number(stockData.price_range_low[stockData.price_range_low.length > 4 ? 4 : stockData.price_range_low.length - 1]).toFixed(2)}
-                      <span className="text-gray-400 mx-1">–</span>
-                      ${Number(stockData.price_range_high[stockData.price_range_high.length > 4 ? 4 : stockData.price_range_high.length - 1]).toFixed(2)}
+                      {currencySymbol}{Number(stockData.price_range_low[selectedRangeIndex]).toFixed(2)}
+                      <span className="text-gray-400 mx-1">-</span>
+                      {currencySymbol}{Number(stockData.price_range_high[selectedRangeIndex]).toFixed(2)}
                     </p>
-                    <p className="text-xs text-gray-600 dark:text-gray-400 mt-1 truncate">10th – 90th percentile</p>
+                    <p className="text-xs text-gray-600 dark:text-gray-400 mt-1 truncate">10th - 90th percentile</p>
                   </>
                 ) : (
                   <>
-                    <p className="text-xl sm:text-2xl lg:text-3xl font-bold text-gray-900 dark:text-white mt-1">${stockData.predicted_price}</p>
-                    <p className="text-xs text-gray-600 dark:text-gray-400 mt-1 sm:mt-2 truncate">Next day forecast</p>
+                    <p className="text-xl sm:text-2xl lg:text-3xl font-bold text-gray-900 dark:text-white mt-1">Range unavailable</p>
+                    <p className="text-xs text-gray-600 dark:text-gray-400 mt-1 sm:mt-2 truncate">Waiting for calibrated range</p>
                   </>
                 )}
               </div>
 
-              <div className={`p-3 sm:p-4 rounded-xl border-2 ${stockData.is_profit ? 'bg-gradient-to-br from-green-50 to-green-100 dark:from-green-500/10 dark:to-green-600/10 border-green-300 dark:border-green-500/20' : 'bg-gradient-to-br from-red-50 to-rose-100 dark:from-red-500/10 dark:to-red-600/10 border-red-300 dark:border-red-500/20'}`}>
-                <p className={`text-xs sm:text-sm font-medium flex items-center gap-1 ${stockData.is_profit ? 'text-green-700 dark:text-green-400' : 'text-red-700 dark:text-red-400'}`}>
+              <div className={`p-3 sm:p-4 rounded-xl border-2 ${selectedRangeChangeHigh >= 0 ? 'bg-gradient-to-br from-green-50 to-green-100 dark:from-green-500/10 dark:to-green-600/10 border-green-300 dark:border-green-500/20' : 'bg-gradient-to-br from-red-50 to-rose-100 dark:from-red-500/10 dark:to-red-600/10 border-red-300 dark:border-red-500/20'}`}>
+                <p className={`text-xs sm:text-sm font-medium flex items-center gap-1 ${selectedRangeChangeHigh >= 0 ? 'text-green-700 dark:text-green-400' : 'text-red-700 dark:text-red-400'}`}>
                   <Activity className="w-3 h-3 sm:w-4 sm:h-4" />
-                  <span className="truncate">Expected Change</span>
+                  <span className="truncate">Expected Move Range</span>
                 </p>
-                <p className={`text-xl sm:text-2xl lg:text-3xl font-bold mt-1 ${stockData.is_profit ? 'text-green-700 dark:text-green-400' : 'text-red-700 dark:text-red-400'}`}>
-                  {stockData.profit_loss >= 0 ? '+' : ''}${stockData.profit_loss.toFixed(2)}
-                </p>
-                <p className={`text-xs sm:text-sm mt-1 sm:mt-2 font-semibold ${stockData.is_profit ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                  {stockData.profit_loss_percent >= 0 ? '+' : ''}{stockData.profit_loss_percent.toFixed(2)}%
-                </p>
+                {hasSelectedRange ? (
+                  <>
+                    <p className={`text-lg sm:text-xl lg:text-2xl font-bold mt-1 ${selectedRangeChangeHigh >= 0 ? 'text-green-700 dark:text-green-400' : 'text-red-700 dark:text-red-400'}`}>
+                      {selectedRangeChangeLow >= 0 ? '+' : ''}{currencySymbol}{selectedRangeChangeLow.toFixed(2)}
+                      <span className="text-gray-400 mx-1">–</span>
+                      {selectedRangeChangeHigh >= 0 ? '+' : ''}{currencySymbol}{selectedRangeChangeHigh.toFixed(2)}
+                    </p>
+                    <p className={`text-xs sm:text-sm mt-1 sm:mt-2 font-semibold ${selectedRangeChangeHigh >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                      {selectedRangePctLow >= 0 ? '+' : ''}{selectedRangePctLow.toFixed(2)}%
+                      <span className="text-gray-400 mx-1">–</span>
+                      {selectedRangePctHigh >= 0 ? '+' : ''}{selectedRangePctHigh.toFixed(2)}%
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-xl sm:text-2xl lg:text-3xl font-bold text-gray-500 dark:text-gray-400 mt-1">N/A</p>
+                    <p className="text-xs text-gray-600 dark:text-gray-400 mt-1 sm:mt-2 truncate">Range not ready</p>
+                  </>
+                )}
               </div>
 
               <div className="bg-gradient-to-br from-purple-50 to-purple-100 dark:from-purple-500/10 dark:to-purple-600/10 p-3 sm:p-4 rounded-xl border border-purple-200 dark:border-purple-500/20">
@@ -1448,6 +1525,8 @@ function Prediction() {
                           date: dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
                           fullDate: dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
                           predicted: pred.price,
+                          rangeLow: pred.range_low,
+                          rangeHigh: pred.range_high,
                           type: 'predicted'
                         };
                       })
@@ -1496,11 +1575,13 @@ function Prediction() {
                                     Price: <span className="font-bold">{currencySymbol}{data.price.toFixed(2)}</span>
                                   </p>
                                 )}
-                                {data.predicted && (
+                                {data.rangeLow != null && data.rangeHigh != null ? (
                                   <p className={`text-xs mt-1 ${stockData.is_profit ? 'text-green-400' : 'text-red-400'}`}>
-                                    Predicted: <span className="font-bold">${data.predicted.toFixed(2)}</span>
+                                    Forecast range: <span className="font-bold">
+                                      {currencySymbol}{Number(data.rangeLow).toFixed(2)} – {currencySymbol}{Number(data.rangeHigh).toFixed(2)}
+                                    </span>
                                   </p>
-                                )}
+                                ) : null}
                               </div>
                             );
                           }
@@ -1528,7 +1609,7 @@ function Prediction() {
                         strokeWidth={3.5}
                         strokeDasharray="6 4"
                         dot={{ fill: stockData.is_profit ? '#10b981' : '#ef4444', r: 5, strokeWidth: 2, stroke: '#fff' }}
-                        name="AI Prediction"
+                        name="AI Forecast Midpoint"
                       />
                       <ReferenceLine
                         y={stockData.current_price}
@@ -1545,7 +1626,7 @@ function Prediction() {
               <div className="bg-white/95 dark:bg-gray-900/95 rounded-xl sm:rounded-2xl shadow-lg p-4 sm:p-5 border border-gray-200 dark:border-gray-700 overflow-hidden">
                 <h3 className="text-base sm:text-lg font-bold text-gray-900 dark:text-white mb-3 flex items-center gap-2">
                   <TrendingUp className="w-4 h-4 sm:w-5 sm:h-5 text-cyan-600 dark:text-cyan-400" />
-                  <span>Historical & Predicted Price</span>
+                  <span>Historical Price & Forecast Range</span>
                 </h3>
                 <TradingViewStyleChart
                   candles={stockData.technical_chart?.candles || []}
@@ -1722,16 +1803,15 @@ function Prediction() {
                         <tr className="bg-gradient-to-r from-gray-100 to-gray-50 dark:from-gray-700 dark:to-gray-800 text-gray-700 dark:text-gray-300 uppercase text-xs font-bold border-b-2 border-gray-200 dark:border-gray-600">
                           <th className="px-3 sm:px-4 py-3 sm:py-4">Date</th>
                           <th className="px-3 sm:px-4 py-3 sm:py-4">Signal</th>
-                          <th className="px-3 sm:px-4 py-3 sm:py-4">Predicted</th>
                           <th className="px-3 sm:px-4 py-3 sm:py-4">Price Range</th>
-                          <th className="px-3 sm:px-4 py-3 sm:py-4">Δ Price</th>
-                          <th className="px-3 sm:px-4 py-3 sm:py-4">Δ %</th>
+                          <th className="px-3 sm:px-4 py-3 sm:py-4">Move Range</th>
+                          <th className="px-3 sm:px-4 py-3 sm:py-4">Move % Range</th>
                         </tr>
                       </thead>
                       <tbody className="bg-white dark:bg-gray-800">
                         {predictionRows.length === 0 && (
                           <tr>
-                            <td colSpan={6} className="px-3 sm:px-4 py-3 sm:py-4 text-center text-gray-500 dark:text-gray-400">
+                            <td colSpan={5} className="px-3 sm:px-4 py-3 sm:py-4 text-center text-gray-500 dark:text-gray-400">
                               No forecast data available.
                             </td>
                           </tr>
@@ -1751,26 +1831,29 @@ function Prediction() {
                                 {row.signal}
                               </span>
                             </td>
-                            <td className="px-3 sm:px-4 py-3 sm:py-4 text-gray-900 dark:text-gray-100 font-bold whitespace-nowrap">{currencySymbol}{row.price}</td>
                             <td className="px-3 sm:px-4 py-3 sm:py-4 whitespace-nowrap">
                               {row.priceLow && row.priceHigh ? (
                                 <div className="flex flex-col">
                                   <span className="text-xs font-bold text-gray-900 dark:text-gray-100">
-                                    ${row.priceLow} – ${row.priceHigh}
+                                    {currencySymbol}{row.priceLow} - {currencySymbol}{row.priceHigh}
                                   </span>
                                   <span className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">
-                                    Bear → Bull
+                                    Bear to bull
                                   </span>
                                 </div>
                               ) : (
-                                <span className="text-gray-400 text-xs">—</span>
+                                <span className="text-gray-400 text-xs">-</span>
                               )}
                             </td>
-                            <td className={`px-3 sm:px-4 py-3 sm:py-4 font-bold whitespace-nowrap ${Number(row.change) >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                              {Number(row.change) >= 0 ? '+' : ''}${row.change}
+                            <td className={`px-3 sm:px-4 py-3 sm:py-4 font-bold whitespace-nowrap ${Number(row.changeHigh) >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                              {Number(row.changeLow) >= 0 ? '+' : ''}{currencySymbol}{row.changeLow}
+                              <span className="text-gray-400 mx-1">-</span>
+                              {Number(row.changeHigh) >= 0 ? '+' : ''}{currencySymbol}{row.changeHigh}
                             </td>
-                            <td className={`px-3 sm:px-4 py-3 sm:py-4 font-bold whitespace-nowrap ${Number(row.changePercent) >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                              {Number(row.changePercent) >= 0 ? '+' : ''}{row.changePercent}%
+                            <td className={`px-3 sm:px-4 py-3 sm:py-4 font-bold whitespace-nowrap ${Number(row.changePctHigh) >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                              {Number(row.changePctLow) >= 0 ? '+' : ''}{row.changePctLow}%
+                              <span className="text-gray-400 mx-1">-</span>
+                              {Number(row.changePctHigh) >= 0 ? '+' : ''}{row.changePctHigh}%
                             </td>
                           </tr>
                         ))}
@@ -1796,7 +1879,6 @@ function Prediction() {
                     const high = Number(stockData.price_range_high[lastIdx]);
                     const q25 = stockData.price_range_q25?.[lastIdx] != null ? Number(stockData.price_range_q25[lastIdx]) : null;
                     const q75 = stockData.price_range_q75?.[lastIdx] != null ? Number(stockData.price_range_q75[lastIdx]) : null;
-                    const median = stockData.future_predictions?.[lastIdx]?.price ? Number(stockData.future_predictions[lastIdx].price) : ((low + high) / 2);
                     const current = Number(stockData.current_price);
                     const range = high - low || 1;
 
@@ -1806,7 +1888,7 @@ function Prediction() {
                         <div className="relative pt-1">
                           <div className="flex justify-between text-[10px] text-gray-500 dark:text-gray-400 mb-1">
                             <span>Bear Case</span>
-                            <span>Median</span>
+                            <span>Forecast Range</span>
                             <span>Bull Case</span>
                           </div>
                           <div className="h-3 rounded-full bg-gradient-to-r from-red-400 via-gray-300 to-green-400 dark:from-red-600 dark:via-gray-600 dark:to-green-600 relative overflow-hidden">
@@ -1816,16 +1898,9 @@ function Prediction() {
                               style={{ left: `${Math.max(0, Math.min(100, ((current - low) / range) * 100))}%` }}
                               title={`Current: ${currencySymbol}${current.toFixed(2)}`}
                             />
-                            {/* Median marker */}
-                            <div
-                              className="absolute top-0 h-full w-1 bg-yellow-400 z-10 rounded"
-                              style={{ left: `${Math.max(0, Math.min(100, ((median - low) / range) * 100))}%` }}
-                              title={`Median: ${currencySymbol}${median.toFixed(2)}`}
-                            />
                           </div>
                           <div className="flex justify-between text-xs font-bold mt-1">
                             <span className="text-red-600 dark:text-red-400">{currencySymbol}{low.toFixed(2)}</span>
-                            <span className="text-yellow-600 dark:text-yellow-400">{currencySymbol}{median.toFixed(2)}</span>
                             <span className="text-green-600 dark:text-green-400">{currencySymbol}{high.toFixed(2)}</span>
                           </div>
                         </div>

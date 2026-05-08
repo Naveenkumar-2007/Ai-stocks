@@ -35,16 +35,35 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
 
 
 def _signal_from_score(score: float, confidence: float, expected_move_pct: float, min_move_pct: float) -> str:
-    """Map a risk-adjusted score to a trade label with a hard no-trade band."""
-    if confidence < 0.38 or abs(expected_move_pct) < min_move_pct:
+    """Map a risk-adjusted score to a trade label.
+
+    The old policy was intentionally defensive, but it made production models
+    look broken because moderate, calibrated edges were collapsed into HOLD.
+    This keeps a no-trade band, while allowing a real directional signal when
+    model/technical evidence is strong enough to clear trading friction.
+    """
+    if confidence < 0.34:
         return "HOLD"
-    if score >= 0.72 and confidence >= 0.70:
+
+    if abs(expected_move_pct) < min_move_pct:
+        strong_but_small = (
+            confidence >= 0.72
+            and abs(score) >= 0.62
+            and abs(expected_move_pct) >= min_move_pct * 0.55
+        )
+        if not strong_but_small:
+            return "HOLD"
+
+    if score * expected_move_pct < 0 and abs(expected_move_pct) >= min_move_pct * 0.70:
+        return "HOLD"
+
+    if score >= 0.68 and confidence >= 0.68:
         return "STRONG BUY"
-    if score >= 0.34:
+    if score >= 0.16:
         return "BUY"
-    if score <= -0.72 and confidence >= 0.70:
+    if score <= -0.68 and confidence >= 0.68:
         return "STRONG SELL"
-    if score <= -0.34:
+    if score <= -0.16:
         return "SELL"
     return "HOLD"
 
@@ -161,9 +180,13 @@ def score_sentiment(sentiment: Optional[Dict[str, Any]]) -> tuple[float, float]:
     raw_score = _clamp(_safe_float(sentiment.get("score"), 0.0))
     buzz_articles = _safe_float(sentiment.get("buzz_articles"), 0.0)
     buzz_score = _safe_float(sentiment.get("buzz_score"), 0.0)
+    explicit_confidence = _safe_float(sentiment.get("sentiment_confidence"), 0.0)
 
     article_quality = min(1.0, buzz_articles / 8.0) if buzz_articles > 0 else 0.35
-    provider_quality = min(1.0, max(float(buzz_score), article_quality))
+    if explicit_confidence > 0:
+        provider_quality = min(1.0, max(explicit_confidence, min(float(buzz_score), article_quality) * 0.50))
+    else:
+        provider_quality = min(1.0, max(float(buzz_score), article_quality))
     quality = max(0.25, min(1.0, provider_quality))
     return _clamp(raw_score * quality), quality
 
@@ -198,34 +221,78 @@ def build_decision(
     ci_high = _safe_float((model_payload or {}).get("upper_95"), model_expected_return + 0.02) * 100.0
     ci_width_pct = max(0.01, ci_high - ci_low)
 
+    metrics = (model_payload or {}).get("metrics") or {}
+    has_validation_metrics = bool(metrics)
+    auc = _safe_float(metrics.get("auc"), 0.5)
+    fold_acc = _safe_float(metrics.get("fold_mean_accuracy"), _safe_float(metrics.get("accuracy"), 50.0))
+    pvalue = _safe_float(metrics.get("binom_pvalue"), 1.0)
+    brier = _safe_float(metrics.get("brier_score"), 0.25)
+    overfit_risk = str(metrics.get("overfit_risk", "unknown")).lower()
+    underfit_risk = str(metrics.get("underfit_risk", "unknown")).lower()
+
+    model_quality = 1.0
+    if has_validation_metrics:
+        if auc < 0.52 and fold_acc < 54.0 and pvalue > 0.10:
+            model_quality *= 0.55
+        elif auc < 0.54 and fold_acc < 55.0:
+            model_quality *= 0.75
+        if overfit_risk == "high":
+            model_quality *= 0.65
+        elif overfit_risk == "medium":
+            model_quality *= 0.82
+        if underfit_risk == "high":
+            model_quality *= 0.60
+        elif underfit_risk == "medium":
+            model_quality *= 0.82
+        if brier > 0.28:
+            model_quality *= 0.75
+    model_quality = max(0.25, min(1.0, model_quality))
+    model_conf *= model_quality
+
     ml_score = _clamp((direction_prob - 0.5) * 2.0)
     if np.sign(ml_score) != np.sign(expected_move_pct) and abs(expected_move_pct) > 0.05:
         ml_score *= 0.45
+    ml_score *= model_quality
 
     technical_score = score_technical(indicators, current_price, market)
     sentiment_score, sentiment_quality = score_sentiment(sentiment)
+    sentiment_cap = 0.35 + 0.65 * model_conf
+    sentiment_score = _clamp(sentiment_score * sentiment_cap)
     momentum_score = _clamp((0.65 * market["momentum_5d_pct"] + 0.35 * market["momentum_20d_pct"]) / 8.0)
     volume_confirmation = _clamp((market["volume_ratio"] - 1.0) / 1.5)
     volume_score = volume_confirmation * _clamp(np.sign(expected_move_pct or ml_score))
 
-    volatility_penalty = min(0.35, max(0.0, (market["daily_vol_pct"] - 3.0) / 20.0))
+    volatility_penalty = min(0.30, max(0.0, (market["daily_vol_pct"] - 3.5) / 22.0))
     raw_score = (
-        0.35 * ml_score
-        + 0.25 * technical_score
-        + 0.20 * sentiment_score
-        + 0.10 * momentum_score
+        0.45 * ml_score
+        + 0.22 * technical_score
+        + 0.17 * sentiment_score
+        + 0.11 * momentum_score
         + 0.05 * volume_score
     )
     final_score = _clamp(raw_score - volatility_penalty * np.sign(raw_score))
 
-    min_required_move_pct = max(0.35, market["atr_pct"] * 0.35, market["daily_vol_pct"] * 0.45)
+    min_required_move_pct = max(0.25, market["atr_pct"] * 0.25, market["daily_vol_pct"] * 0.30)
     move_quality = min(1.0, abs(expected_move_pct) / max(min_required_move_pct * 2.0, 1e-9))
     interval_quality = max(0.0, min(1.0, 1.0 - (ci_width_pct / max(abs(expected_move_pct) * 4.0 + 1.0, 1.0))))
     agreement = 1.0 - (np.std([ml_score, technical_score, sentiment_score, momentum_score]) / 1.2)
     agreement = max(0.0, min(1.0, float(agreement)))
-    confidence = max(0.0, min(1.0, 0.40 * model_conf + 0.25 * move_quality + 0.20 * agreement + 0.15 * interval_quality))
+    probability_edge = min(1.0, abs(direction_prob - 0.5) / 0.18)
+    confidence = max(
+        0.0,
+        min(
+            1.0,
+            0.38 * model_conf
+            + 0.22 * move_quality
+            + 0.18 * agreement
+            + 0.12 * interval_quality
+            + 0.10 * probability_edge,
+        ),
+    )
 
     reasons: List[str] = []
+    if model_quality < 0.80:
+        reasons.append("Model validation quality reduced the strength of this signal.")
     if abs(expected_move_pct) < min_required_move_pct:
         reasons.append(
             f"Expected move {expected_move_pct:+.2f}% is below the volatility-adjusted trade threshold "
@@ -242,11 +309,16 @@ def build_decision(
     if technical_score * ml_score < -0.15:
         reasons.append("Technical indicators disagree with the ML direction.")
         confidence = min(confidence, 0.62)
-    if ci_low <= 0 <= ci_high:
+    if ci_low <= 0 <= ci_high and (abs(expected_move_pct) < min_required_move_pct * 1.4 or confidence < 0.62):
         reasons.append("Prediction interval crosses zero, so directional edge is uncertain.")
         confidence = min(confidence, 0.60)
     if market["daily_vol_pct"] > 5.0:
         reasons.append("High realized volatility reduced signal quality.")
+
+    if model_quality < 0.70 and abs(final_score) < 0.35:
+        reasons.append("Validation quality is not strong enough for a directional trade.")
+        final_score *= 0.45
+        confidence = min(confidence, 0.48)
 
     signal = _signal_from_score(final_score, confidence, expected_move_pct, min_required_move_pct)
     if signal == "HOLD" and not reasons:
@@ -284,13 +356,14 @@ def build_decision(
             "momentum": round(float(momentum_score), 4),
             "volume": round(float(volume_score), 4),
             "volatility_penalty": round(float(volatility_penalty), 4),
+            "model_quality": round(float(model_quality), 4),
         },
         thresholds={
-            "buy_score": 0.34,
-            "strong_buy_score": 0.72,
-            "sell_score": -0.34,
-            "strong_sell_score": -0.72,
-            "min_confidence": 0.38,
+            "buy_score": 0.16,
+            "strong_buy_score": 0.68,
+            "sell_score": -0.16,
+            "strong_sell_score": -0.68,
+            "min_confidence": 0.34,
             "min_required_move_pct": round(float(min_required_move_pct), 4),
         },
         risk=market,

@@ -1,6 +1,6 @@
 ---
 title: AI Stock Predictor
-emoji: 📈
+emoji: chart_with_upwards_trend
 colorFrom: blue
 colorTo: green
 sdk: docker
@@ -8,169 +8,234 @@ pinned: false
 app_port: 7860
 ---
 
-# 📈 AI Stock Predictor & Quantitative MLOps Platform (v5.2)
+# AI Stock Predictor & MLOps Platform
 
-<div align="center">
-  <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License"/>
-  <img src="https://img.shields.io/badge/python-3.10%2B-blue" alt="Python"/>
-  <img src="https://img.shields.io/badge/react-18.0-61dafb?logo=react&logoColor=black" alt="React"/>
-  <img src="https://img.shields.io/badge/XGBoost-172554?logo=xgboost&logoColor=white" alt="XGBoost"/>
-  <img src="https://img.shields.io/badge/MLflow-0194E2?logo=mlflow&logoColor=white" alt="MLflow"/>
-  <img src="https://img.shields.io/badge/Grafana-F46800?logo=grafana&logoColor=white" alt="Grafana"/>
-</div>
+Production-style stock prediction system with a React dashboard, Flask API, multi-provider market data fallbacks, guarded BUY/HOLD/SELL recommendations, quantile price ranges, and monitoring artifacts generated from walk-forward model validation.
 
-An enterprise-grade, real-time stock market prediction platform powered by a **Multi-Market Institutional Engine (v5.2)**. Built with a complete end-to-end MLOps pipeline, walk-forward cross-validation, adaptive class weighting, and a dual-model ensemble (XGBoost + Random Forest) for unparalleled directional accuracy.
+> This project is for research and education. It is not financial advice.
 
----
+## Current Status
 
-## 🏆 Engine v5.2: Multi-Market Portfolio Performance
+Latest retrain: `2026-05-08`
 
-The **Institutional Predictive Alpha Portfolio Analysis** below highlights the latest v5.2 walk-forward cross-validation results. The engine monitored all 10 trained stocks across the portfolio (US Mega-cap Tech + Indian NSE): `INFY`, `GOOGL`, `NVDA`, `TCS`, `AAPL`, `MSFT`, `AMZN`, `RELIANCE`, `TSLA`, and `META`.
+The current portfolio run trained all 10 configured stocks:
 
-![Institutional Predictive Alpha Portfolio Analysis](backend/monitoring/institutional_predictive_alpha_portfolio_analysis.png)
+`AAPL`, `MSFT`, `GOOGL`, `AMZN`, `NVDA`, `RELIANCE.NS`, `TCS.NS`, `INFY.NS`, `TSLA`, `META`
 
-### Key v5.2 Breakthroughs
-*   **Dual-Model Ensemble**: Fuses two XGBoost estimators (differing regularizations) with a Random Forest meta-learner to capture distinct market regimes.
-*   **Adaptive Class Weights**: Dynamically calculates `scale_pos_weight` per ticker to natively handle volatile, imbalanced trends.
-*   **Early Stopping Rounds**: Prevents overfitting on heavily algorithmic stocks by dynamically halting tree growth during validation.
-*   **Multi-Market Significance**: 7 out of 10 tracked assets proved **statistically significant predictive edges (p < 0.05)**, with top performers like `INFY.NS` and `GOOGL` achieving 66%+ directional accuracy.
+Latest aggregate metrics from [multimarket_summary.json](backend/monitoring/reports/multimarket_summary.json):
 
----
+| Metric | Value |
+| --- | ---: |
+| Models trained | 10 / 10 |
+| Average accuracy | 60.41% |
+| Average AUC | 0.614 |
+| Average F1 | 46.61% |
+| Statistically significant models, p < 0.05 | 7 / 10 |
 
-## 🗺️ Multi-Market Metrics Heatmap
+Latest signal evaluation from [top10_signal_evaluation.json](backend/monitoring/reports/top10_signal_evaluation.json):
 
-This heatmap demonstrates the exact correlation between our predictive edge and institutional metrics. Notice how heavily news-driven assets (like TSLA and META) show weaker technical predictability, while structurally algorithmic stocks (GOOGL, INFY) exhibit massive, exploitable F1 scores.
+| Signal | Stocks |
+| --- | --- |
+| BUY | AAPL, GOOGL, AMZN, NVDA |
+| HOLD | MSFT, TSLA, META, INFY.NS, TCS.NS, RELIANCE.NS |
 
-![Multi-Market Heatmap](backend/monitoring/reports/multimarket_heatmap.png)
+The guarded decision engine intentionally holds weak, overfit, or low-confidence models instead of forcing aggressive BUY/SELL calls.
 
----
+## What Is Implemented
 
-## 🔬 Deep Dive: Asset-Specific Monitoring Dashboards
+- Unified Engine v5.2 model artifacts saved per ticker under `backend/unified_engine/models`.
+- Leak-resistant feature selection using train-only windows.
+- Walk-forward validation with purge/embargo style time-series evaluation.
+- Per-fold scaler fitting to avoid train/test contamination.
+- Overfit and underfit diagnostics saved into model metadata.
+- Adaptive class weighting for imbalanced directional targets.
+- Probability calibration and threshold-aware BUY/HOLD/SELL gating.
+- Quantile price ranges for forecast display.
+- Volatility-based fallback ranges if quantile outputs are unavailable.
+- Frontend forecast table shows price ranges, move ranges, and percent move ranges instead of exact target prices.
+- Multi-provider data fallback with API key rotation:
+  - Twelve Data
+  - Finnhub
+  - Alpha Vantage
+  - Yahoo Finance fallback for supported symbols
+- Indian symbol support:
+  - `INFY.NS` maps to Twelve Data `INFY` + `NSE`
+  - `TCS.NS` can fall back to Alpha Vantage `TCS.BSE`
+  - `RELIANCE.NS` can fall back to Alpha Vantage `RELIANCE.BSE`
+- Sentiment is normalized and downweighted when coverage is weak.
+- New or untrained stocks enter training mode instead of showing fake predictions.
 
-Every stock processed by the platform auto-generates an institutional 4-panel monitoring report tracking Walk-Forward Accuracy, Fold Calibration, Feature Importance, and Binomial p-value significance.
+## Monitoring Artifacts
 
-### 🇺🇸 US Mega-Cap Tech
-| Stock | Dashboard | Walk-Forward Acc | F1 Score | Significance |
-| :--- | :--- | :--- | :--- | :--- |
-| **GOOGL** | [View Chart](backend/monitoring/reports/GOOGL_monitoring.png) | 66.48% | 79.86% | `p < 0.0001` ✅ |
-| **NVDA** | [View Chart](backend/monitoring/reports/NVDA_monitoring.png) | 61.41% | 76.09% | `p = 0.0012` ✅ |
-| **AAPL** | [View Chart](backend/monitoring/reports/AAPL_monitoring.png) | 58.73% | 74.00% | `p = 0.0098` ✅ |
-| **MSFT** | [View Chart](backend/monitoring/reports/MSFT_monitoring.png) | 57.61% | 73.10% | `p = 0.0231` ✅ |
-| **AMZN** | [View Chart](backend/monitoring/reports/AMZN_monitoring.png) | 57.56% | 73.06% | `p = 0.0282` ✅ |
+The latest chart files were generated successfully in `backend/monitoring/reports`.
 
-### 🇮🇳 Indian Equities (NSE)
-| Stock | Dashboard | Walk-Forward Acc | F1 Score | Significance |
-| :--- | :--- | :--- | :--- | :--- |
-| **INFY.NS** | [View Chart](backend/monitoring/reports/INFY_NS_monitoring.png) | 68.18% | 70.21% | `p = 0.0004` ✅ |
-| **TCS.NS** | [View Chart](backend/monitoring/reports/TCS_NS_monitoring.png) | 61.36% | N/A | `p = 0.0211` ✅ |
-| **RELIANCE.NS** | [View Chart](backend/monitoring/reports/RELIANCE_NS_monitoring.png) | 55.43% | 71.33% | `p = 0.1740` ⚠️ |
+### Portfolio Charts
 
-### ⚠️ Volatile / Sentiment-Driven
-| Stock | Dashboard | Walk-Forward Acc | F1 Score | Significance |
-| :--- | :--- | :--- | :--- | :--- |
-| **TSLA** | [View Chart](backend/monitoring/reports/TSLA_monitoring.png) | 51.70% | 68.16% | `p = 0.3531` ❌ |
-| **META** | [View Chart](backend/monitoring/reports/META_monitoring.png) | 51.70% | 68.16% | `p = 0.3531` ❌ |
+- [Combined multi-market monitoring](backend/monitoring/reports/combined_multimarket_monitoring.png)
+- [Multi-market heatmap](backend/monitoring/reports/multimarket_heatmap.png)
+- [Top 10 signal overview](backend/monitoring/reports/top10_signal_overview.png)
+- [Ultimate v5.2 dashboard](backend/monitoring/reports/ultimate_v52_dashboard.png)
 
----
+### Per-Stock Monitoring Charts
 
-## 📐 System Architecture & Data Flow
+| Stock | Chart | Accuracy | AUC | F1 | p-value | Overfit Risk |
+| --- | --- | ---: | ---: | ---: | ---: | --- |
+| AAPL | [chart](backend/monitoring/reports/AAPL_monitoring.png) | 65.5% | 0.593 | 79.1% | 0.0000 | medium |
+| MSFT | [chart](backend/monitoring/reports/MSFT_monitoring.png) | 47.2% | 0.650 | 0.0% | 0.7965 | high |
+| GOOGL | [chart](backend/monitoring/reports/GOOGL_monitoring.png) | 76.7% | 0.619 | 86.8% | 0.0000 | medium |
+| AMZN | [chart](backend/monitoring/reports/AMZN_monitoring.png) | 62.8% | 0.734 | 77.1% | 0.0004 | medium |
+| NVDA | [chart](backend/monitoring/reports/NVDA_monitoring.png) | 70.4% | 0.549 | 82.6% | 0.0000 | medium |
+| RELIANCE.NS | [chart](backend/monitoring/reports/RELIANCE_NS_monitoring.png) | 52.2% | 0.726 | 0.0% | 0.3773 | medium |
+| TCS.NS | [chart](backend/monitoring/reports/TCS_NS_monitoring.png) | 65.6% | 0.611 | 0.0% | 0.0014 | high |
+| INFY.NS | [chart](backend/monitoring/reports/INFY_NS_monitoring.png) | 56.8% | 0.467 | 71.2% | 0.0413 | high |
+| TSLA | [chart](backend/monitoring/reports/TSLA_monitoring.png) | 50.0% | 0.616 | 0.0% | 0.5300 | high |
+| META | [chart](backend/monitoring/reports/META_monitoring.png) | 57.1% | 0.574 | 69.3% | 0.0325 | medium |
 
-The platform relies on a sophisticated MLOps loop. Unknown tickers instantly fallback to technical math while a background thread automatically engineers features, trains the v5.2 ensemble, and persists the model for the next request.
+## Architecture
 
 ```mermaid
 graph TD
-    %% Define Styling
-    classDef ui fill:#0f172a,stroke:#38bdf8,stroke-width:2px,color:#f8fafc;
-    classDef api fill:#1e1b4b,stroke:#a855f7,stroke-width:2px,color:#f8fafc;
-    classDef model fill:#064e3b,stroke:#10b981,stroke-width:2px,color:#f8fafc;
-    classDef db fill:#450a0a,stroke:#f43f5e,stroke-width:2px,color:#f8fafc;
-
-    subgraph Client ["🖥️ User Experience"]
-        React["React Frontend Dashboard"]:::ui
-        Chat["FastAPI Chatbot UI"]:::ui
-    end
-
-    subgraph Orchestration ["⚙️ Runtime API (Flask)"]
-        Router{"Model Exists?"}:::api
-        TechFall["Technical Analysis Fallback"]:::api
-        ServeModel["Serve v5.2 Prediction"]:::api
-        Thread["Spin Async Background Training"]:::api
-    end
-
-    subgraph Engine ["🧠 v5.2 Ensemble Trainer"]
-        Data["Fetch Finnhub/TwelveData OHLCV"]:::model
-        Feat["Compute Alpha Signals (30+ Features)"]:::model
-        Train["Train Dual-XGBoost + RF"]:::model
-        Calibrate["Probability Calibration (Platt)"]:::model
-    end
-
-    subgraph Persistence ["💾 Artifacts & Observability"]
-        Registry["Local Model Registry (.joblib)"]:::db
-        Reports["Monitoring Charts (PNG/JSON)"]:::db
-        Grafana["Grafana & Prometheus"]:::db
-    end
-
-    %% Flow logic
-    React -->|Request Ticker| Router
-    Router -->|No| TechFall
-    Router -->|Yes| ServeModel
-    TechFall --> Thread
-    Thread --> Data
-    Data --> Feat
-    Feat --> Train
-    Train --> Calibrate
-    Calibrate --> Registry
-    Calibrate --> Reports
-    Registry -.-> ServeModel
-    ServeModel --> Grafana
+    UI[React prediction dashboard] --> API[Flask API]
+    API --> Resolver[Symbol resolver]
+    Resolver --> TD[Twelve Data]
+    Resolver --> FH[Finnhub]
+    Resolver --> AV[Alpha Vantage]
+    Resolver --> YF[Yahoo Finance fallback]
+    API --> Engine[Unified Engine v5.2]
+    Engine --> Features[Feature engine]
+    Features --> Models[XGBoost + LightGBM + RandomForest + meta learner]
+    Models --> Calib[Probability calibration]
+    Models --> Quantiles[Quantile price ranges]
+    Calib --> Decision[Guarded decision engine]
+    Quantiles --> Decision
+    Decision --> Ranges[Range-first frontend forecasts]
+    Engine --> Reports[PNG and JSON monitoring reports]
 ```
 
----
+## Environment Variables
 
-## 🚀 Getting Started
+Create `backend/.env`. Do not commit real secrets.
 
-### Prerequisites
-- Python 3.10+
-- Node.js 18+
+The app supports both singular and plural key variables. The plural variables are preferred because they allow provider key rotation when rate limits are hit.
 
-### 1. Backend Setup
+```env
+# Flask
+FLASK_ENV=development
+SECRET_KEY=replace-with-a-long-random-secret
+
+# Twelve Data
+TWELVE_DATA_API_KEYS=key1,key2
+TWELVE_DATA_API_KEY=key1
+
+# Alpha Vantage
+ALPHA_VANTAGE_API_KEYS=key1,key2,key3
+ALPHA_VANTAGE_API_KEY=key1
+
+# Finnhub
+FINNHUB_API_KEYS=key1,key2
+FINNHUB_API_KEY=key1
+
+# Optional LLM/chatbot key
+GROQ_API_KEY=your_key
+```
+
+Current local `.env` check:
+
+- `TWELVE_DATA_API_KEYS`: present, 2 keys, no duplicates detected.
+- `ALPHA_VANTAGE_API_KEYS`: present, 3 keys, no duplicates detected.
+- `FINNHUB_API_KEYS`: present, 2 keys, no duplicates detected.
+- Singular fallback keys are also present.
+- `SECRET_KEY` was not found and should be added for production.
+
+## Setup
+
+### Backend
+
 ```bash
-# Clone the repository
-git clone https://github.com/Naveenkumar-2007/Ai-stocks.git
-cd Ai-stocks/backend
-
-# Install dependencies
+cd backend
 pip install -r requirements.txt
-
-# Create .env file and add your keys
-echo "FINNHUB_API_KEY=your_key" > .env
-echo "GROQ_API_KEY=your_key" >> .env
-
-# Run the Flask API
 python app.py
 ```
 
-### 2. Frontend Setup
-```bash
-cd ../frontend
+Backend default local URL:
 
-# Install node modules
-npm install
-
-# Start development server
-npm run dev
+```text
+http://localhost:8000
 ```
 
-### 3. Bulk Training the Portfolio
-To regenerate the v5.2 models and dashboards across the 10-stock universe:
+### Frontend
+
+```bash
+cd frontend
+npm install
+npm start
+```
+
+Frontend default local URL:
+
+```text
+http://localhost:3000
+```
+
+## Training And Evaluation
+
+Retrain the configured 10-stock portfolio:
+
 ```bash
 cd backend
 python train_top5_monitor.py
 ```
 
----
+Evaluate the latest trained models and save signal reports:
 
-## 🤝 Contributing
-Contributions are welcome! If you'd like to improve the AI ensemble strategies, add sentiment NLP models for stocks like TSLA/META, or enhance the React UI, feel free to open a Pull Request.
+```bash
+cd backend
+python evaluate_top10_models.py
+```
 
-> *Note: Simulated PnL and Sharpe Ratios generated in the monitoring dashboards are derived from walk-forward validation accuracy and do not constitute financial advice.*
+Run backend tests:
+
+```bash
+python -m pytest backend/tests -q
+```
+
+Build the frontend:
+
+```bash
+cd frontend
+npm run build
+```
+
+## Forecast Display Contract
+
+The UI is intentionally range-first:
+
+- No exact price target is shown in the Forecast Signals table.
+- Forecast rows show 10th to 90th percentile price range.
+- Move range and move percent range are computed from the current price.
+- Charts may use the model midpoint internally for drawing continuity, but visible tooltips and tables show ranges.
+- If a model is not ready, the app shows training mode and does not display fake forecast prices.
+
+## Known Limitations
+
+- Finnhub blocks some `.NS` Indian stock sentiment/news endpoints with `403` on the current key plan. The decision engine treats this as low-confidence or neutral sentiment instead of forcing sentiment.
+- Some models are intentionally conservative because overfit risk is high. This is expected behavior, not a UI bug.
+- Alpha Vantage free plans may rate-limit quickly and may not allow `outputsize=full` for some symbols. Multiple keys help, but provider plan limits can still apply.
+
+## Verification Snapshot
+
+Recently verified:
+
+```text
+python -m py_compile backend/app.py backend/stock_api.py backend/unified_engine/inference.py
+python -m pytest backend/tests -q
+npm run build
+```
+
+Live endpoint range checks:
+
+```text
+AAPL    ready=True   ranges=7/7   invalid_ranges=0
+TCS.NS  ready=True   ranges=7/7   invalid_ranges=0
+IBM     ready=False  training mode, no fake forecast shown
+```

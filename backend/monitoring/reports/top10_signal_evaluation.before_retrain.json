@@ -1,0 +1,381 @@
+{
+  "generated_at": "2026-05-03T18:11:29.265707Z",
+  "retrained": false,
+  "tickers": [
+    "AAPL",
+    "MSFT",
+    "GOOGL",
+    "AMZN",
+    "NVDA",
+    "TSLA",
+    "META",
+    "INFY.NS",
+    "TCS.NS",
+    "RELIANCE.NS"
+  ],
+  "summary": {
+    "evaluated": 10,
+    "ok": 10,
+    "signal_counts": {
+      "BUY": 2,
+      "HOLD": 7,
+      "SELL": 1
+    },
+    "avg_confidence": 0.3862
+  },
+  "results": [
+    {
+      "ticker": "AAPL",
+      "status": "ok",
+      "signal": "BUY",
+      "confidence": 0.5036,
+      "score": 0.4462,
+      "expected_move_pct": 2.0774,
+      "min_required_move_pct": 0.6042,
+      "direction_prob": 0.5875128660002118,
+      "prediction": 0.020773932130544508,
+      "lower_95": -0.029340189129728543,
+      "upper_95": 0.04061008945301967,
+      "model_version": "v5.2-20260503-1046",
+      "trained_at": "2026-05-03T10:45:29.789018Z",
+      "metadata_accuracy": 58.730158730158735,
+      "metadata_auc": 0.5184800184800185,
+      "metadata_f1": 74.0,
+      "reasons": [
+        "Prediction interval crosses zero, so directional edge is uncertain."
+      ],
+      "components": {
+        "ml": 0.175,
+        "technical": 0.4956,
+        "sentiment": 0.93,
+        "sentiment_quality": 1.0,
+        "momentum": 0.6862,
+        "volume": 0.4955,
+        "volatility_penalty": 0.0
+      },
+      "sentiment": {
+        "score": 0.93,
+        "confidence": 0.625,
+        "buzz_articles": 8
+      }
+    },
+    {
+      "ticker": "MSFT",
+      "status": "ok",
+      "signal": "HOLD",
+      "confidence": 0.3775,
+      "score": 0.1489,
+      "expected_move_pct": 0.8624,
+      "min_required_move_pct": 0.7456,
+      "direction_prob": 0.5761233538012309,
+      "prediction": 0.008623746866197214,
+      "lower_95": -0.04242478731026595,
+      "upper_95": 0.04912655412548357,
+      "model_version": "v5.2-20260503-1047",
+      "trained_at": "2026-05-03T10:46:37.028240Z",
+      "metadata_accuracy": 57.608695652173914,
+      "metadata_auc": 0.5671262699564588,
+      "metadata_f1": 73.10344827586206,
+      "reasons": [
+        "Prediction interval crosses zero, so directional edge is uncertain."
+      ],
+      "components": {
+        "ml": 0.1522,
+        "technical": 0.3613,
+        "sentiment": -0.16,
+        "sentiment_quality": 1.0,
+        "momentum": 0.2853,
+        "volume": -0.065,
+        "volatility_penalty": 0.0
+      },
+      "sentiment": {
+        "score": -0.16,
+        "confidence": 1.0,
+        "buzz_articles": 7
+      }
+    },
+    {
+      "ticker": "GOOGL",
+      "status": "ok",
+      "signal": "HOLD",
+      "confidence": 0.365,
+      "score": 0.4603,
+      "expected_move_pct": 0.1041,
+      "min_required_move_pct": 0.7414,
+      "direction_prob": 0.6648504766349821,
+      "prediction": 0.0010411761853574262,
+      "lower_95": -0.05536579609861976,
+      "upper_95": 0.046299359215755044,
+      "model_version": "v5.2-20260503-1048",
+      "trained_at": "2026-05-03T10:47:40.387437Z",
+      "metadata_accuracy": 66.47727272727273,
+      "metadata_auc": 0.4835578733883819,
+      "metadata_f1": 79.86348122866895,
+      "reasons": [
+        "Expected move +0.10% is below the volatility-adjusted trade threshold 0.74%.",
+        "Prediction interval crosses zero, so directional edge is uncertain."
+      ],
+      "components": {
+        "ml": 0.3297,
+        "technical": 0.735,
+        "sentiment": 0.2125,
+        "sentiment_quality": 0.625,
+        "momentum": 1.0,
+        "volume": 0.0823,
+        "volatility_penalty": 0.0
+      },
+      "sentiment": {
+        "score": 0.34,
+        "confidence": 0.444,
+        "buzz_articles": 5
+      }
+    },
+    {
+      "ticker": "AMZN",
+      "status": "ok",
+      "signal": "HOLD",
+      "confidence": 0.4376,
+      "score": 0.2719,
+      "expected_move_pct": -1.6771,
+      "min_required_move_pct": 0.7042,
+      "direction_prob": 0.5749015181860334,
+      "prediction": -0.016770509395502564,
+      "lower_95": -0.05197217532644596,
+      "upper_95": 0.04312760212958945,
+      "model_version": "v5.2-20260503-1049",
+      "trained_at": "2026-05-03T10:48:39.755044Z",
+      "metadata_accuracy": 57.55813953488372,
+      "metadata_auc": 0.5685623356856234,
+      "metadata_f1": 73.06273062730627,
+      "reasons": [
+        "Prediction interval crosses zero, so directional edge is uncertain."
+      ],
+      "components": {
+        "ml": 0.0674,
+        "technical": 0.5933,
+        "sentiment": 0.0088,
+        "sentiment_quality": 0.875,
+        "momentum": 1.0,
+        "volume": -0.0091,
+        "volatility_penalty": 0.0
+      },
+      "sentiment": {
+        "score": 0.01,
+        "confidence": 0.857,
+        "buzz_articles": 7
+      }
+    },
+    {
+      "ticker": "NVDA",
+      "status": "ok",
+      "signal": "BUY",
+      "confidence": 0.533,
+      "score": 0.1807,
+      "expected_move_pct": 2.8647,
+      "min_required_move_pct": 0.807,
+      "direction_prob": 0.6140795310822504,
+      "prediction": 0.028647399126264895,
+      "lower_95": -0.04706742925662612,
+      "upper_95": 0.138238147122802,
+      "model_version": "v5.2-20260503-1051",
+      "trained_at": "2026-05-03T10:49:36.669009Z",
+      "metadata_accuracy": 61.41304347826087,
+      "metadata_auc": 0.5299763180855042,
+      "metadata_f1": 76.0942760942761,
+      "reasons": [
+        "Prediction interval crosses zero, so directional edge is uncertain."
+      ],
+      "components": {
+        "ml": 0.2282,
+        "technical": 0.3061,
+        "sentiment": -0.0,
+        "sentiment_quality": 0.625,
+        "momentum": 0.1363,
+        "volume": -0.0863,
+        "volatility_penalty": 0.0
+      },
+      "sentiment": {
+        "score": -0.0,
+        "confidence": 0.198,
+        "buzz_articles": 5
+      }
+    },
+    {
+      "ticker": "TSLA",
+      "status": "ok",
+      "signal": "HOLD",
+      "confidence": 0.2163,
+      "score": 0.1619,
+      "expected_move_pct": 0.4502,
+      "min_required_move_pct": 0.9802,
+      "direction_prob": 0.5170744275074425,
+      "prediction": 0.004502386709706609,
+      "lower_95": -0.08273800126944547,
+      "upper_95": 0.0891107600735782,
+      "model_version": "v5.2-20260503-1054",
+      "trained_at": "2026-05-03T10:52:47.624846Z",
+      "metadata_accuracy": 51.70454545454546,
+      "metadata_auc": 0.5093729799612152,
+      "metadata_f1": 68.16479400749064,
+      "reasons": [
+        "Expected move +0.45% is below the volatility-adjusted trade threshold 0.98%.",
+        "Prediction interval crosses zero, so directional edge is uncertain."
+      ],
+      "components": {
+        "ml": 0.0341,
+        "technical": 0.1523,
+        "sentiment": 0.23,
+        "sentiment_quality": 1.0,
+        "momentum": 0.6803,
+        "volume": -0.0177,
+        "volatility_penalty": 0.0
+      },
+      "sentiment": {
+        "score": 0.23,
+        "confidence": 0.625,
+        "buzz_articles": 8
+      }
+    },
+    {
+      "ticker": "META",
+      "status": "ok",
+      "signal": "HOLD",
+      "confidence": 0.1757,
+      "score": -0.1069,
+      "expected_move_pct": -0.1441,
+      "min_required_move_pct": 0.8867,
+      "direction_prob": 0.516310212054761,
+      "prediction": -0.001441001186399085,
+      "lower_95": -0.04950285342609816,
+      "upper_95": 0.0612396777137049,
+      "model_version": "v5.2-20260503-1056",
+      "trained_at": "2026-05-03T10:54:42.209107Z",
+      "metadata_accuracy": 51.70454545454546,
+      "metadata_auc": 0.507563025210084,
+      "metadata_f1": 68.16479400749064,
+      "reasons": [
+        "Expected move -0.14% is below the volatility-adjusted trade threshold 0.89%.",
+        "Prediction interval crosses zero, so directional edge is uncertain."
+      ],
+      "components": {
+        "ml": 0.0147,
+        "technical": -0.3537,
+        "sentiment": 0.2,
+        "sentiment_quality": 1.0,
+        "momentum": -0.5366,
+        "volume": -0.2137,
+        "volatility_penalty": 0.0
+      },
+      "sentiment": {
+        "score": 0.2,
+        "confidence": 0.818,
+        "buzz_articles": 11
+      }
+    },
+    {
+      "ticker": "INFY.NS",
+      "status": "ok",
+      "signal": "SELL",
+      "confidence": 0.3542,
+      "score": -0.1947,
+      "expected_move_pct": -1.4663,
+      "min_required_move_pct": 0.7581,
+      "direction_prob": 0.5060733753911387,
+      "prediction": -0.014662900131389444,
+      "lower_95": -0.0715985061179649,
+      "upper_95": 0.02130857581089919,
+      "model_version": "v5.2-20260503-1052",
+      "trained_at": "2026-05-03T10:52:18.122716Z",
+      "metadata_accuracy": 68.18181818181817,
+      "metadata_auc": 0.6900826446280992,
+      "metadata_f1": 70.2127659574468,
+      "reasons": [
+        "Prediction interval crosses zero, so directional edge is uncertain."
+      ],
+      "components": {
+        "ml": 0.0055,
+        "technical": -0.61,
+        "sentiment": 0.0,
+        "sentiment_quality": 0.35,
+        "momentum": -0.6258,
+        "volume": 0.1183,
+        "volatility_penalty": 0.0
+      },
+      "sentiment": {
+        "score": 0,
+        "confidence": 0,
+        "buzz_articles": 0
+      }
+    },
+    {
+      "ticker": "TCS.NS",
+      "status": "ok",
+      "signal": "HOLD",
+      "confidence": 0.5318,
+      "score": -0.1314,
+      "expected_move_pct": -1.3991,
+      "min_required_move_pct": 0.6414,
+      "direction_prob": 0.38623788071384163,
+      "prediction": -0.01399128575632548,
+      "lower_95": -0.046466738053754814,
+      "upper_95": 0.027755015875600902,
+      "model_version": "v5.2-20260503-1052",
+      "trained_at": "2026-05-03T10:51:49.032040Z",
+      "metadata_accuracy": 61.36363636363637,
+      "metadata_auc": 0.5490196078431373,
+      "metadata_f1": 0.0,
+      "reasons": [
+        "Prediction interval crosses zero, so directional edge is uncertain."
+      ],
+      "components": {
+        "ml": -0.2275,
+        "technical": -0.1765,
+        "sentiment": 0.0,
+        "sentiment_quality": 0.35,
+        "momentum": 0.059,
+        "volume": 0.0659,
+        "volatility_penalty": 0.0
+      },
+      "sentiment": {
+        "score": 0,
+        "confidence": 0,
+        "buzz_articles": 0
+      }
+    },
+    {
+      "ticker": "RELIANCE.NS",
+      "status": "ok",
+      "signal": "HOLD",
+      "confidence": 0.3673,
+      "score": 0.1655,
+      "expected_move_pct": -0.8385,
+      "min_required_move_pct": 0.5603,
+      "direction_prob": 0.553983612839076,
+      "prediction": -0.008385174834144287,
+      "lower_95": -0.039180947376235536,
+      "upper_95": 0.0373820259940934,
+      "model_version": "v5.2-20260503-1051",
+      "trained_at": "2026-05-03T10:51:16.709880Z",
+      "metadata_accuracy": 55.434782608695656,
+      "metadata_auc": 0.6690578670492586,
+      "metadata_f1": 71.32867132867133,
+      "reasons": [
+        "Prediction interval crosses zero, so directional edge is uncertain."
+      ],
+      "components": {
+        "ml": 0.0486,
+        "technical": 0.3045,
+        "sentiment": 0.0,
+        "sentiment_quality": 0.35,
+        "momentum": 0.8115,
+        "volume": -0.2523,
+        "volatility_penalty": 0.0
+      },
+      "sentiment": {
+        "score": 0,
+        "confidence": 0,
+        "buzz_articles": 0
+      }
+    }
+  ]
+}

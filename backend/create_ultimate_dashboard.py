@@ -2,11 +2,6 @@ import os, json, sys
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
-from matplotlib.offsetbox import OffsetImage, AnnotationBbox
-from adjustText import adjust_text
-import urllib.request
-import io
-from PIL import Image
 
 backend_dir = os.path.dirname(os.path.abspath(__file__))
 json_path = os.path.join(backend_dir, "monitoring", "reports", "multimarket_summary.json")
@@ -26,54 +21,17 @@ if not stocks:
 # Sort stocks from Best to Lowest based on Accuracy
 stocks.sort(key=lambda x: x["metrics"].get("accuracy", 0), reverse=True)
 
-# Extract real metrics
+# Extract real metrics only (walk-forward validation)
 tickers = [s["ticker"] for s in stocks]
 accs = [s["metrics"].get("accuracy", 0) for s in stocks]
 f1s = [s["metrics"].get("f1", 0) for s in stocks]
 aucs = [s["metrics"].get("auc", 0.5) for s in stocks]
-
-# Deterministically estimate backtest metrics from real validation metrics
-# because the v5.2 pipeline is walk-forward validation (not a full PnL backtester)
-# We map the validation edge (Accuracy - 50) to realistic portfolio metrics
-total_returns = []
-ann_returns = []
-sharpes = []
-win_rates = []
-trades = []
-max_dds = []
-pfs = []
-
-for s in stocks:
-    acc = s["metrics"].get("accuracy", 50)
-    f1 = s["metrics"].get("f1", 50)
-    auc = s["metrics"].get("auc", 0.5)
-    folds = s["metrics"].get("n_folds", 20)
-    
-    edge = max(0, acc - 50)
-    
-    # 5-year assumed backtest horizon
-    ann_ret = edge * 2.2 + (auc - 0.5) * 10
-    ann_ret = max(2.5, ann_ret) # minimum 2.5%
-    
-    tot_ret = ((1 + ann_ret/100)**5 - 1) * 100
-    
-    volatility = 18.0 - edge * 0.2
-    sharpe = (ann_ret - 2.0) / volatility
-    
-    win_rate = acc * 0.95 # slightly lower than directional acc
-    trade_count = folds * 8
-    
-    max_dd = max(10.0, 35.0 - edge * 1.5)
-    
-    pf = 1.0 + (edge * 0.08)
-    
-    total_returns.append(tot_ret)
-    ann_returns.append(ann_ret)
-    sharpes.append(sharpe)
-    win_rates.append(win_rate)
-    trades.append(trade_count)
-    max_dds.append(max_dd)
-    pfs.append(pf)
+pvals = [s["metrics"].get("binom_pvalue", 1.0) for s in stocks]
+fold_means = [s["metrics"].get("fold_mean_accuracy", 0) for s in stocks]
+fold_stds = [s["metrics"].get("fold_std_accuracy", 0) for s in stocks]
+train_samples = [s["metrics"].get("training_samples", 0) for s in stocks]
+calib_samples = [s["metrics"].get("calibration_samples", 0) for s in stocks]
+fold_counts = [s["metrics"].get("n_folds", 0) for s in stocks]
 
 # Plotting
 plt.rcParams.update({
@@ -89,9 +47,9 @@ plt.rcParams.update({
 })
 
 fig = plt.figure(figsize=(18, 14))
-fig.suptitle("AI Stock Forecasting Performance Monitor", 
+fig.suptitle("AI Stock Forecasting Performance Monitor",
              fontsize=20, fontweight="bold", color="#ffffff", y=0.96)
-fig.text(0.5, 0.93, f"Performance metrics derived from walk-forward cross-validation (dual-model ensemble)", 
+fig.text(0.5, 0.93, "Metrics from walk-forward validation only (no synthetic backtest estimates)",
          ha="center", fontsize=11, color="#94a3b8")
 
 gs = gridspec.GridSpec(3, 2, height_ratios=[1, 1, 0.6], hspace=0.4, wspace=0.25, top=0.88, bottom=0.05, left=0.05, right=0.95)
@@ -124,71 +82,35 @@ ax2.set_title("F1 Score (%)", fontsize=12, fontweight="bold", color="#ffffff")
 for bar, val in zip(bars2, f1s):
     ax2.text(bar.get_x() + bar.get_width()/2, val + 1, f"{val:.1f}%", ha="center", fontsize=9)
 
-# 3. Total Return
+# 3. AUC-ROC
 ax3 = fig.add_subplot(gs[1, 0])
-colors3 = [get_color(r, 100, 50) for r in total_returns]
-bars3 = ax3.bar(short_tickers, total_returns, color=colors3, width=0.7)
-ax3.set_ylim(0, max(total_returns) * 1.2)
-ax3.set_title("Projected 5-Year Total Return (%)", fontsize=12, fontweight="bold", color="#ffffff")
-for bar, val in zip(bars3, total_returns):
-    ax3.text(bar.get_x() + bar.get_width()/2, val + 2, f"{val:.1f}%", ha="center", fontsize=9)
+colors3 = ["#22c55e" if a >= 0.55 else "#0ea5e9" if a >= 0.50 else "#ef4444" for a in aucs]
+bars3 = ax3.bar(short_tickers, aucs, color=colors3, width=0.7)
+ax3.axhline(0.5, color="#475569", ls="--", lw=1)
+ax3.set_ylim(0, 1.0)
+ax3.set_title("AUC-ROC", fontsize=12, fontweight="bold", color="#ffffff")
+for bar, val in zip(bars3, aucs):
+    ax3.text(bar.get_x() + bar.get_width()/2, val + 0.02, f"{val:.3f}", ha="center", fontsize=9)
 
-# 4. Sharpe vs Ann Return Scatter (with jitter and logos)
+# 4. Accuracy vs AUC scatter
 ax4 = fig.add_subplot(gs[1, 1])
-
-domains = {
-    "AAPL": "apple.com", "MSFT": "microsoft.com", "GOOGL": "google.com",
-    "AMZN": "amazon.com", "NVDA": "nvidia.com", "RELIANCE": "ril.com",
-    "TCS": "tcs.com", "INFY": "infosys.com", "TSLA": "tesla.com", "META": "meta.com"
-}
-
-# Add jitter to avoid exact overlaps (like TSLA/META or NVDA/TCS)
-np.random.seed(42)
-sharpes_jittered = [s + np.random.uniform(-0.02, 0.02) for s in sharpes]
-ann_returns_jittered = [a + np.random.uniform(-0.5, 0.5) for a in ann_returns]
-
-texts = []
 for i, t in enumerate(short_tickers):
-    x, y = sharpes_jittered[i], ann_returns_jittered[i]
-    ax4.scatter(x, y, s=250, color=colors1[i], edgecolor="#ffffff", lw=1.5, zorder=3)
-    
-    # Try fetching and plotting the logo
-    logo_drawn = False
-    domain = domains.get(t)
-    if domain:
-        url = f"https://logo.clearbit.com/{domain}?size=60"
-        try:
-            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-            with urllib.request.urlopen(req, timeout=3) as resp:
-                img = Image.open(io.BytesIO(resp.read()))
-                # Make logo circular or just place it
-                imagebox = OffsetImage(img, zoom=0.4, alpha=0.9)
-                ab = AnnotationBbox(imagebox, (x, y), frameon=False, zorder=4)
-                ax4.add_artist(ab)
-                logo_drawn = True
-        except Exception:
-            pass
-
-    # Add text to list for adjustText
-    txt = ax4.text(x, y, t, fontsize=10, fontweight="bold", color="#ffffff" if not logo_drawn else "#94a3b8")
-    texts.append(txt)
-
-# Stronger repulsion to prevent mixing, with bright visible arrows
-adjust_text(texts, ax=ax4, 
-            force_text=(1.2, 1.5), force_points=(2.5, 2.5), 
-            expand=(2.0, 2.0), 
-            arrowprops=dict(arrowstyle="->", color="#facc15", lw=1.8, alpha=1.0))
-
+    ax4.scatter(aucs[i], accs[i], s=180, color=colors1[i], edgecolor="#ffffff", lw=1.2, zorder=3)
+    ax4.text(aucs[i] + 0.005, accs[i] + 0.6, t, fontsize=9, color="#e2e8f0")
+ax4.axvline(0.5, color="#475569", ls="--", lw=1)
+ax4.axhline(50, color="#475569", ls="--", lw=1)
+ax4.set_xlim(0.4, 0.75)
+ax4.set_ylim(40, 80)
 ax4.grid(True, zorder=0)
-ax4.set_xlabel("Sharpe Ratio")
-ax4.set_ylabel("Annualized Return (%)")
-ax4.set_title("Sharpe Ratio vs Annualized Return", fontsize=12, fontweight="bold", color="#ffffff")
+ax4.set_xlabel("AUC-ROC")
+ax4.set_ylabel("Accuracy (%)")
+ax4.set_title("Accuracy vs AUC-ROC", fontsize=12, fontweight="bold", color="#ffffff")
 
 # 5. Table
 ax5 = fig.add_subplot(gs[2, :])
 ax5.axis("off")
 
-columns = ["Ticker", "Acc %", "F1 %", "AUC", "Total Ret %", "Ann Ret %", "Sharpe", "Win %", "Trades", "Max DD %", "PF"]
+columns = ["Ticker", "Acc %", "F1 %", "AUC", "p-value", "Fold Mean %", "Fold Std %", "Train N", "Calib N", "Folds"]
 cell_text = []
 for i in range(len(tickers)):
     row = [
@@ -196,13 +118,12 @@ for i in range(len(tickers)):
         f"{accs[i]:.2f}",
         f"{f1s[i]:.2f}",
         f"{aucs[i]:.3f}",
-        f"{total_returns[i]:.2f}",
-        f"{ann_returns[i]:.2f}",
-        f"{sharpes[i]:.2f}",
-        f"{win_rates[i]:.2f}",
-        f"{trades[i]}",
-        f"{max_dds[i]:.2f}",
-        f"{pfs[i]:.2f}"
+        f"{pvals[i]:.4f}",
+        f"{fold_means[i]:.2f}",
+        f"{fold_stds[i]:.2f}",
+        f"{train_samples[i]}",
+        f"{calib_samples[i]}",
+        f"{fold_counts[i]}"
     ]
     cell_text.append(row)
 
@@ -223,3 +144,67 @@ for (row, col), cell in table.get_celld().items():
 out_path = os.path.join(backend_dir, "monitoring", "reports", "ultimate_v52_dashboard.png")
 fig.savefig(out_path, dpi=150, bbox_inches="tight", facecolor=fig.get_facecolor())
 print(f"Chart generated successfully: {out_path}")
+
+# Optional: signal/sentiment overview from evaluation report
+signal_json = os.path.join(backend_dir, "monitoring", "reports", "top10_signal_evaluation.json")
+if os.path.exists(signal_json):
+    try:
+        with open(signal_json, "r", encoding="utf-8") as f:
+            signal_data = json.load(f)
+
+        rows = [r for r in signal_data.get("results", []) if r.get("status") == "ok"]
+        if rows:
+            fig2 = plt.figure(figsize=(18, 10))
+            fig2.suptitle("Signal + Sentiment Overview", fontsize=18, fontweight="bold", color="#ffffff", y=0.96)
+            fig2.text(0.5, 0.92, "Live signal outputs from current model artifacts", ha="center", fontsize=11, color="#94a3b8")
+
+            gs2 = gridspec.GridSpec(2, 2, hspace=0.35, wspace=0.25, top=0.88, bottom=0.08, left=0.06, right=0.95)
+            tickers2 = [r.get("ticker", "") for r in rows]
+            short2 = [t.replace(".NS", "") for t in tickers2]
+
+            # Signal counts
+            ax_s1 = fig2.add_subplot(gs2[0, 0])
+            signals = [r.get("signal", "HOLD") for r in rows]
+            unique_signals = ["STRONG BUY", "BUY", "HOLD", "SELL", "STRONG SELL"]
+            counts = [signals.count(s) for s in unique_signals]
+            ax_s1.bar(unique_signals, counts, color=["#22c55e", "#4ade80", "#f59e0b", "#fb7185", "#ef4444"], width=0.7)
+            ax_s1.set_title("Signal Distribution", fontsize=12, fontweight="bold", color="#ffffff")
+            ax_s1.set_ylabel("Count")
+            ax_s1.grid(True, axis="y")
+            ax_s1.tick_params(axis="x", rotation=20)
+
+            # Confidence
+            ax_s2 = fig2.add_subplot(gs2[0, 1])
+            confs = [float(r.get("confidence", 0) or 0) * 100 for r in rows]
+            ax_s2.bar(short2, confs, color="#38bdf8", width=0.7)
+            ax_s2.set_title("Signal Confidence (%)", fontsize=12, fontweight="bold", color="#ffffff")
+            ax_s2.set_ylim(0, 100)
+            ax_s2.grid(True, axis="y")
+            ax_s2.tick_params(axis="x", rotation=35)
+
+            # Expected move
+            ax_s3 = fig2.add_subplot(gs2[1, 0])
+            moves = [float(r.get("expected_move_pct", 0) or 0) for r in rows]
+            move_colors = ["#22c55e" if m > 0 else "#ef4444" if m < 0 else "#f59e0b" for m in moves]
+            ax_s3.bar(short2, moves, color=move_colors, width=0.7)
+            ax_s3.axhline(0, color="#475569", ls="--", lw=1)
+            ax_s3.set_title("Expected Move (%)", fontsize=12, fontweight="bold", color="#ffffff")
+            ax_s3.grid(True, axis="y")
+            ax_s3.tick_params(axis="x", rotation=35)
+
+            # Sentiment score
+            ax_s4 = fig2.add_subplot(gs2[1, 1])
+            sentiment = [float((r.get("sentiment") or {}).get("score", 0) or 0) for r in rows]
+            sent_colors = ["#22c55e" if s > 0 else "#ef4444" if s < 0 else "#f59e0b" for s in sentiment]
+            ax_s4.bar(short2, sentiment, color=sent_colors, width=0.7)
+            ax_s4.axhline(0, color="#475569", ls="--", lw=1)
+            ax_s4.set_title("Sentiment Score", fontsize=12, fontweight="bold", color="#ffffff")
+            ax_s4.grid(True, axis="y")
+            ax_s4.tick_params(axis="x", rotation=35)
+
+            signal_out = os.path.join(backend_dir, "monitoring", "reports", "top10_signal_overview.png")
+            fig2.savefig(signal_out, dpi=150, bbox_inches="tight", facecolor=fig.get_facecolor())
+            plt.close(fig2)
+            print(f"Signal overview chart generated: {signal_out}")
+    except Exception as exc:
+        print(f"Signal overview skipped: {exc}")

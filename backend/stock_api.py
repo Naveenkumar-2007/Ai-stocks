@@ -8,6 +8,7 @@ import requests
 import pandas as pd
 from datetime import datetime, timedelta
 import os
+import re
 from dotenv import load_dotenv
 import logging
 from cache_manager import get_cache
@@ -147,6 +148,11 @@ COUNTRY_SUFFIX_FALLBACKS = {
 
 DEFAULT_SUFFIX_FALLBACKS = ['.NS', '.BO', '.L', '.HK', '.TO']
 
+TWELVE_DATA_SUFFIX_EXCHANGES = {
+    '.NS': 'NSE',
+    '.BO': 'BSE',
+}
+
 
 #  Dynamic key getters (always return the currently active key) 
 def _get_twelve_key():
@@ -218,7 +224,64 @@ def _normalize_symbol(symbol: str) -> str:
     base = symbol.strip().upper()
     if ':' in base:
         base = base.split(':')[0]
-    return base.replace(' ', '')
+    base = base.replace(' ', '')
+    for suffix in ('.NS', '.BO', '.BSE', '.NSE'):
+        if base.endswith(suffix):
+            return base[:-len(suffix)]
+    return base
+
+
+def _twelvedata_symbol_params(symbol: str, exchange: str | None = None) -> tuple[str, str | None]:
+    """Translate Yahoo-style suffixes into Twelve Data symbol + exchange params."""
+    cleaned = (symbol or '').strip().upper()
+    exchange_hint = (exchange or '').strip().upper() or None
+
+    for suffix, td_exchange in TWELVE_DATA_SUFFIX_EXCHANGES.items():
+        if cleaned.endswith(suffix):
+            return cleaned[:-len(suffix)], exchange_hint or td_exchange
+
+    return cleaned, exchange_hint
+
+
+def _alphavantage_symbol_candidates(
+    symbol: str,
+    exchange: str | None = None,
+    country: str | None = None
+) -> list[str]:
+    """Generate Alpha Vantage symbols, including Indian BSE fallbacks for Yahoo-style tickers."""
+    cleaned = (symbol or '').strip().upper().replace(' ', '')
+    base = _normalize_symbol(cleaned)
+    exchange_hint = (exchange or '').strip().upper()
+    country_hint = (country or '').strip().lower()
+    candidates: list[str] = []
+    seen: set[str] = set()
+
+    def push(candidate: str):
+        normalized = candidate.strip().upper()
+        if normalized and normalized not in seen:
+            candidates.append(normalized)
+            seen.add(normalized)
+
+    is_india_hint = (
+        country_hint == 'india'
+        or exchange_hint in {'NSE', 'BSE', 'BOMBAY STOCK EXCHANGE', 'NATIONAL STOCK EXCHANGE OF INDIA'}
+        or cleaned.endswith(('.NS', '.BO', '.NSE', '.BSE'))
+    )
+
+    if cleaned.endswith(('.NS', '.NSE', '.BO')):
+        push(f'{base}.BSE')
+        push(base)
+    elif cleaned.endswith('.BSE'):
+        push(cleaned)
+        push(base)
+    elif is_india_hint:
+        push(f'{base}.BSE')
+        push(base)
+    else:
+        push(cleaned)
+        push(base)
+
+    return candidates
 
 
 def _yfinance_variant_candidates(symbol: str, exchange: str | None, country: str | None) -> list[str]:
@@ -329,9 +392,10 @@ def search_symbols(query: str, limit: int = 5):
         if not query:
             return []
 
+        search_query, exchange_hint = _twelvedata_symbol_params(query)
         url = f'{BASE_URL}/symbol_search'
         params = {
-            'symbol': query,
+            'symbol': search_query,
             'outputsize': max(1, min(limit, 30)),
             'apikey': _get_twelve_key()
         }
@@ -342,6 +406,12 @@ def search_symbols(query: str, limit: int = 5):
         data = payload.get('data') or []
 
         results = []
+        if exchange_hint:
+            data = sorted(
+                data,
+                key=lambda entry: 0 if str(entry.get('exchange', '')).upper() == exchange_hint else 1
+            )
+
         for entry in data[:limit]:
             results.append({
                 'symbol': entry.get('symbol', '').upper(),
@@ -402,6 +472,8 @@ def get_stock_history(
             return df, cached_data.get('info', {})
         return df
 
+    td_symbol, td_exchange = _twelvedata_symbol_params(ticker, exchange)
+
     info = {
         'symbol': ticker.upper() if isinstance(ticker, str) else ticker,
         'source': 'twelvedata',
@@ -416,11 +488,13 @@ def get_stock_history(
 
         url = f'{BASE_URL}/time_series'
         params = {
-            'symbol': ticker,
+            'symbol': td_symbol,
             'interval': interval,
             'outputsize': min(days, 5000),  # Max 5000 data points
             'format': 'JSON'
         }
+        if td_exchange:
+            params['exchange'] = td_exchange
 
         # Use key rotation for automatic failover on rate limits
         response = _request_with_rotation(twelve_data_rotator, url, params, apikey_param='apikey', timeout=30)
@@ -453,6 +527,8 @@ def get_stock_history(
 
             data_frame['Dividends'] = 0.0
             data_frame['Stock Splits'] = 0.0
+            info['twelvedata_symbol'] = td_symbol
+            info['exchange'] = td_exchange or exchange
 
             print(f"âœ… Successfully fetched {len(data_frame)} data points for {ticker}")
             if not data_frame.empty:
@@ -559,19 +635,28 @@ def get_stock_history(
         
         try:
             av_url = "https://www.alphavantage.co/query"
-            av_params = {
-                'function': 'TIME_SERIES_DAILY',
-                'symbol': ticker,
-                'outputsize': 'compact'  # Last 100 data points
-            }
-            
-            print(f"  Trying Alpha Vantage with {ticker} (with key rotation)...")
-            response = _request_with_rotation(alpha_vantage_rotator, av_url, av_params, apikey_param='apikey', timeout=15)
-            av_data = response.json()
-            
-            if 'Time Series (Daily)' in av_data:
+            av_candidates = _alphavantage_symbol_candidates(ticker, exchange=exchange, country=country)
+            outputsize = 'full' if days and days > 100 else 'compact'
+
+            for av_symbol in av_candidates:
+                av_params = {
+                    'function': 'TIME_SERIES_DAILY',
+                    'symbol': av_symbol,
+                    'outputsize': outputsize
+                }
+
+                print(f"  Trying Alpha Vantage with {av_symbol} (with key rotation)...")
+                response = _request_with_rotation(alpha_vantage_rotator, av_url, av_params, apikey_param='apikey', timeout=15)
+                av_data = response.json()
+
+                if 'Time Series (Daily)' not in av_data:
+                    error_msg = av_data.get('Note') or av_data.get('Information') or av_data.get('Error Message')
+                    if error_msg:
+                        print(f"  Alpha Vantage {av_symbol}: {error_msg}")
+                    continue
+
                 time_series = av_data['Time Series (Daily)']
-                
+
                 # Convert to DataFrame
                 df_data = []
                 for date_str, values in time_series.items():
@@ -583,42 +668,43 @@ def get_stock_history(
                         'close': float(values['4. close']),
                         'volume': int(values['5. volume'])
                     })
-                
-                if df_data:
-                    fallback_df = pd.DataFrame(df_data)
-                    fallback_df.set_index('datetime', inplace=True)
-                    fallback_df.sort_index(inplace=True)
-                    
-                    # Limit to requested days
-                    if days and len(fallback_df) > days:
-                        fallback_df = fallback_df.tail(days)
-                    
-                    # Rename columns to match expected format
-                    fallback_df.columns = ['Open', 'High', 'Low', 'Close', 'Volume']
-                    
-                    # Add required columns
-                    fallback_df['Dividends'] = 0.0
-                    fallback_df['Stock Splits'] = 0.0
-                    
-                    data_frame = fallback_df
-                    info['source'] = 'alphavantage'
-                    needs_fallback = False
-                    
-                    logger.info(f"âœ… Alpha Vantage: Successfully fetched {len(data_frame)} data points for {ticker}")
-                    print(f"âœ… Alpha Vantage: Successfully fetched {len(data_frame)} data points for {ticker}")
-                    
-                    # Cache the successful result
-                    cache_entry = {
-                        'dataframe': data_frame.reset_index().to_dict('records'),
-                        'info': info
-                    }
-                    cache.set('stock_history', cache_params, cache_entry)
-                    print(f"ðŸ’¾ Cached Alpha Vantage data for {ticker}")
-                    
-            else:
-                error_msg = av_data.get('Note') or av_data.get('Error Message')
-                if error_msg:
-                    print(f"  Alpha Vantage: {error_msg}")
+
+                if not df_data:
+                    continue
+
+                fallback_df = pd.DataFrame(df_data)
+                fallback_df.set_index('datetime', inplace=True)
+                fallback_df.sort_index(inplace=True)
+
+                # Limit to requested days
+                if days and len(fallback_df) > days:
+                    fallback_df = fallback_df.tail(days)
+
+                # Rename columns to match expected format
+                fallback_df.columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+
+                # Add required columns
+                fallback_df['Dividends'] = 0.0
+                fallback_df['Stock Splits'] = 0.0
+
+                data_frame = fallback_df
+                info['source'] = 'alphavantage'
+                info['alphavantage_symbol'] = av_symbol
+                if av_symbol.endswith('.BSE'):
+                    info['exchange'] = 'BSE'
+                needs_fallback = False
+
+                logger.info(f"âœ… Alpha Vantage: Successfully fetched {len(data_frame)} data points for {ticker} via {av_symbol}")
+                print(f"âœ… Alpha Vantage: Successfully fetched {len(data_frame)} data points for {ticker} via {av_symbol}")
+
+                # Cache the successful result
+                cache_entry = {
+                    'dataframe': data_frame.reset_index().to_dict('records'),
+                    'info': info
+                }
+                cache.set('stock_history', cache_params, cache_entry)
+                print(f"ðŸ’¾ Cached Alpha Vantage data for {ticker}")
+                break
                 
         except Exception as e:
             logger.error(f"âŒ Alpha Vantage error for {ticker}: {str(e)}")
@@ -1072,6 +1158,36 @@ def get_company_news(ticker, days=7):
         return []
 
 
+def _clamp_sentiment_score(value):
+    try:
+        return max(-1.0, min(1.0, float(value)))
+    except Exception:
+        return 0.0
+
+
+def _normalize_sentiment_fraction(value):
+    try:
+        numeric = float(value or 0.0)
+    except Exception:
+        return 0.0
+    if numeric > 1.0 and numeric <= 100.0:
+        numeric = numeric / 100.0
+    return max(0.0, min(1.0, numeric))
+
+
+def _sentiment_label(score):
+    score = _clamp_sentiment_score(score)
+    if score > 0.6:
+        return 'STRONG BUY', 'positive'
+    if score > 0.2:
+        return 'BUY', 'positive'
+    if score >= -0.2:
+        return 'HOLD', 'neutral'
+    if score >= -0.6:
+        return 'SELL', 'negative'
+    return 'STRONG SELL', 'negative'
+
+
 def get_sentiment_analysis(ticker):
     """
     Fetch sentiment analysis from Finnhub API
@@ -1117,31 +1233,37 @@ def get_sentiment_analysis(ticker):
         # Finnhub returns bullishPercent/bearishPercent as FRACTIONS (0.0 to 1.0)
         # e.g. bullishPercent=0.65 means 65% bullish
         # Score = bullish - bearish, already in -1 to +1 range
-        bullish_frac = sentiment.get('bullishPercent', 0)
-        bearish_frac = sentiment.get('bearishPercent', 0)
+        bullish_frac = _normalize_sentiment_fraction(sentiment.get('bullishPercent', 0))
+        bearish_frac = _normalize_sentiment_fraction(sentiment.get('bearishPercent', 0))
         
         # If Finnhub returns 0 for both, fall back to news-based analysis
         if bullish_frac == 0 and bearish_frac == 0:
             print(f"Finnhub returned zero sentiment for {ticker}, falling back to news...")
             return calculate_sentiment_from_news(ticker)
         
-        overall_score = bullish_frac - bearish_frac  # Already -1..+1
-        
-        if overall_score > 0.6:
-            sentiment_label = 'STRONG BUY'
-            sentiment_class = 'positive'
-        elif overall_score > 0.2:
-            sentiment_label = 'BUY'
-            sentiment_class = 'positive'
-        elif overall_score > -0.2:
-            sentiment_label = 'HOLD'
-            sentiment_class = 'neutral'
-        elif overall_score > -0.6:
-            sentiment_label = 'SELL'
-            sentiment_class = 'negative'
-        else:
-            sentiment_label = 'STRONG SELL'
-            sentiment_class = 'negative'
+        total_frac = bullish_frac + bearish_frac
+        if total_frac > 1.05:
+            bullish_frac = bullish_frac / total_frac
+            bearish_frac = bearish_frac / total_frac
+
+        overall_score = _clamp_sentiment_score(bullish_frac - bearish_frac)
+        article_count = float(buzz.get('articlesInLastWeek', 0) or 0)
+        buzz_score = float(buzz.get('buzz', 0) or 0)
+        sentiment_confidence = max(
+            0.10,
+            min(1.0, max(min(article_count / 12.0, 1.0), min(buzz_score, 1.0)))
+        )
+
+        if sentiment_confidence < 0.35:
+            overall_score *= 0.70
+
+        if sentiment_confidence < 0.45 or article_count < 3:
+            news_result = calculate_sentiment_from_news(ticker)
+            news_conf = float(news_result.get('sentiment_confidence', 0.0) or 0.0)
+            if news_conf > sentiment_confidence:
+                return news_result
+
+        sentiment_label, sentiment_class = _sentiment_label(overall_score)
         
         # Convert fractions to display percentages (0-100)
         bullish_display = round(bullish_frac * 100, 2)
@@ -1154,7 +1276,8 @@ def get_sentiment_analysis(ticker):
             'bullish_percent': bullish_display,
             'bearish_percent': bearish_display,
             'buzz_articles': buzz.get('articlesInLastWeek', 0),
-            'buzz_score': buzz.get('buzz', 0)
+            'buzz_score': buzz.get('buzz', 0),
+            'sentiment_confidence': round(float(sentiment_confidence), 3),
         }
         
         print(f"âœ… Sentiment: {sentiment_label} (Score: {overall_score:.2f}, Bull: {bullish_display}%, Bear: {bearish_display}%)")
@@ -1192,7 +1315,8 @@ def calculate_sentiment_from_news(ticker):
                 'bullish_percent': 50,
                 'bearish_percent': 50,
                 'buzz_articles': 0,
-                'buzz_score': 0
+                'buzz_score': 0,
+                'sentiment_confidence': 0
             }
         
         # Expanded keyword lists for financial news sentiment
@@ -1234,6 +1358,12 @@ def calculate_sentiment_from_news(ticker):
             'record revenue': 1.2,
             'strong guidance': 1.2,
             'upgrade to buy': 1.4,
+            'initiates buy': 1.2,
+            'overweight rating': 1.1,
+            'positive guidance': 1.2,
+            'margin expansion': 1.0,
+            'free cash flow growth': 1.1,
+            'earnings surprise': 1.0,
         }
         negative_phrases = {
             'lowers price target': 1.3,
@@ -1243,7 +1373,14 @@ def calculate_sentiment_from_news(ticker):
             'weak guidance': 1.2,
             'downgrade to sell': 1.4,
             'target decrease': 1.1,
+            'initiates sell': 1.2,
+            'underweight rating': 1.1,
+            'negative guidance': 1.2,
+            'margin pressure': 1.0,
+            'cash burn': 1.1,
+            'earnings miss': 1.1,
         }
+        negation_terms = ('not', 'no', 'never', 'without', 'less')
         source_weights = {
             'reuters': 1.20,
             'bloomberg': 1.20,
@@ -1261,6 +1398,25 @@ def calculate_sentiment_from_news(ticker):
         weights = []
         now_ts = datetime.now().timestamp()
         
+        scored_articles = []
+
+        def count_terms(text_value, terms):
+            tokens = re.findall(r"[a-zA-Z][a-zA-Z\-']+", text_value)
+            token_set = set(tokens)
+            return sum(1 for term in terms if term in token_set)
+
+        def negation_adjustment(text_value):
+            # Damp keyword sentiment near "not/no/less" to avoid false positives
+            # like "not strong" or "no growth".
+            adjustment = 1.0
+            words = re.findall(r"[a-zA-Z][a-zA-Z\-']+", text_value)
+            for i, word in enumerate(words):
+                if word in negation_terms:
+                    window = words[i + 1:i + 4]
+                    if any(w in positive_keywords or w in negative_keywords for w in window):
+                        adjustment *= 0.65
+            return max(0.35, adjustment)
+
         for article in news:
             headline_lower = article.get('headline', '').lower()
             summary_lower = article.get('summary', '').lower()
@@ -1268,15 +1424,18 @@ def calculate_sentiment_from_news(ticker):
             text = f"{headline_lower} {summary_lower}"
             
             # Count matches - headlines weighted more than summaries.
-            headline_pos = sum(1 for kw in positive_keywords if kw in headline_lower)
-            headline_neg = sum(1 for kw in negative_keywords if kw in headline_lower)
-            summary_pos = sum(1 for kw in positive_keywords if kw in summary_lower)
-            summary_neg = sum(1 for kw in negative_keywords if kw in summary_lower)
+            headline_pos = count_terms(headline_lower, positive_keywords)
+            headline_neg = count_terms(headline_lower, negative_keywords)
+            summary_pos = count_terms(summary_lower, positive_keywords)
+            summary_neg = count_terms(summary_lower, negative_keywords)
             
             pos_score = (headline_pos * 2) + summary_pos
             neg_score = (headline_neg * 2) + summary_neg
             pos_score += sum(weight for phrase, weight in positive_phrases.items() if phrase in text)
             neg_score += sum(weight for phrase, weight in negative_phrases.items() if phrase in text)
+            neg_adj = negation_adjustment(text)
+            pos_score *= neg_adj
+            neg_score *= neg_adj
 
             # Financial nuance: "maintains neutral/market perform" is not strongly bearish
             # even when a target is trimmed. Damp both sides toward neutrality.
@@ -1305,6 +1464,12 @@ def calculate_sentiment_from_news(ticker):
                 weight = max(0.10, min(1.50, source_weight * time_decay))
                 weighted_scores.append(article_score * weight)
                 weights.append(weight)
+                scored_articles.append({
+                    'headline': article.get('headline', ''),
+                    'source': article.get('source', ''),
+                    'score': round(float(article_score), 3),
+                    'weight': round(float(weight), 3),
+                })
             # Articles with no keyword matches are skipped (not neutral)
         
         if not weighted_scores or not weights:
@@ -1316,11 +1481,19 @@ def calculate_sentiment_from_news(ticker):
                 'bullish_percent': 50,
                 'bearish_percent': 50,
                 'buzz_articles': len(news),
-                'buzz_score': min(len(news) / 10, 1.0)
+                'buzz_score': 0,
+                'sentiment_confidence': 0
             }
         
         # Weighted average naturally stays in -1..+1 range.
         score = sum(weighted_scores) / max(sum(weights), 1e-9)
+        coverage = len(weighted_scores) / max(len(news), 1)
+        sentiment_confidence = max(0.10, min(1.0, coverage * min(sum(weights) / 4.0, 1.0)))
+
+        # Low-coverage headline sentiment is useful context, not a trade driver.
+        if sentiment_confidence < 0.35:
+            score *= 0.65
+
         score = max(-1.0, min(1.0, score))
         
         # Convert to percentages for display
@@ -1328,21 +1501,7 @@ def calculate_sentiment_from_news(ticker):
         bearish_percent = round(100 - bullish_percent, 2)
         
         # Determine sentiment label (same thresholds as Finnhub path)
-        if score > 0.6:
-            sentiment_label = 'STRONG BUY'
-            sentiment_class = 'positive'
-        elif score > 0.2:
-            sentiment_label = 'BUY'
-            sentiment_class = 'positive'
-        elif score > -0.2:
-            sentiment_label = 'HOLD'
-            sentiment_class = 'neutral'
-        elif score > -0.6:
-            sentiment_label = 'SELL'
-            sentiment_class = 'negative'
-        else:
-            sentiment_label = 'STRONG SELL'
-            sentiment_class = 'negative'
+        sentiment_label, sentiment_class = _sentiment_label(score)
         
         print(f"ðŸ“Š News Sentiment ({len(weighted_scores)}/{len(news)} articles scored): {sentiment_label} (Score: {score:.2f})")
         
@@ -1353,7 +1512,10 @@ def calculate_sentiment_from_news(ticker):
             'bullish_percent': bullish_percent,
             'bearish_percent': bearish_percent,
             'buzz_articles': len(news),
-            'buzz_score': min(len(news) / 10, 1.0)
+            'buzz_score': round(float(sentiment_confidence), 3),
+            'sentiment_confidence': round(float(sentiment_confidence), 3),
+            'scored_articles': len(weighted_scores),
+            'top_sentiment_drivers': scored_articles[:5],
         }
         
         # Cache the calculated result too

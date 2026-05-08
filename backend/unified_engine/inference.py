@@ -124,6 +124,22 @@ def _run_inference(ticker, artifact, hist, current_price, days):
     calibrator = artifact["calibrator"]
     quantile_models = artifact.get("quantile_models", {})
 
+    # Some Windows/container hosts deny thread/process primitives used by
+    # joblib-backed estimators with n_jobs=-1. Inference is one row at a time,
+    # so single-worker prediction is both safer and fast enough.
+    for estimator in (xgb_model, artifact.get("xgb_model_2"), lgbm_model, rf_model, meta_learner):
+        if estimator is not None and hasattr(estimator, "n_jobs"):
+            try:
+                estimator.n_jobs = 1
+            except Exception:
+                pass
+    for q_model in quantile_models.values():
+        if hasattr(q_model, "n_jobs"):
+            try:
+                q_model.n_jobs = 1
+            except Exception:
+                pass
+
     # Direction probability
     xgb_prob = float(xgb_model.predict_proba(X_latest)[0, 1])
 
@@ -162,13 +178,15 @@ def _run_inference(ticker, artifact, hist, current_price, days):
 
     # === STEP 5: Quantile predictions (REAL confidence intervals) ===
     base_price = current_price if current_price else float(hist_clean["Close"].iloc[-1])
-    total_days = max(1, int(days))
+    total_days = max(1, min(int(days), CONFIG.prediction_days_ui))
 
     # Get quantile return predictions
     q_predictions = {}
     for alpha, q_model in quantile_models.items():
         q_return = float(q_model.predict(X_latest)[0])
         q_predictions[alpha] = q_return
+
+    residual_quantiles = artifact.get("residual_quantiles") or {}
 
     # Fallback if no quantile models
     avg_abs_return = artifact.get("avg_abs_return", 0.02)
@@ -184,8 +202,22 @@ def _run_inference(ticker, artifact, hist, current_price, days):
 
     expected_return = q_predictions.get(0.50, lgbm_mag)
 
+    # Blend model quantiles with empirical residual quantiles for calibration
+    if residual_quantiles and q_predictions:
+        blend = float(getattr(CONFIG, "quantile_blend_weight", 0.70))
+        for alpha, q_val in list(q_predictions.items()):
+            resid = residual_quantiles.get(alpha)
+            if resid is None:
+                resid = residual_quantiles.get(str(alpha))
+            if resid is None:
+                continue
+            q_predictions[alpha] = (blend * q_val) + ((1.0 - blend) * (expected_return + float(resid)))
+        expected_return = q_predictions.get(0.50, expected_return)
+
     # === STEP 6: Generate price RANGES for each day ===
-    daily_fraction = 1.0 / max(CONFIG.prediction_horizon, 1)
+    artifact_config = artifact.get("config", {}) if isinstance(artifact.get("config", {}), dict) else {}
+    trained_horizon = int(artifact_config.get("prediction_horizon") or CONFIG.prediction_horizon)
+    daily_fraction = 1.0 / max(trained_horizon, 1)
 
     predicted_prices = []      # median path
     price_range_low = []       # 10th percentile (bear case)
@@ -242,13 +274,13 @@ def _run_inference(ticker, artifact, hist, current_price, days):
         "quantile_returns": {str(k): float(v) for k, v in q_predictions.items()},
         # Model info
         "model_version": artifact.get("version", "v5.0"),
-        "model_type": "Unified Ensemble v5.0",
+        "model_type": "Unified Ensemble v5.2",
         "features_used": selected_features,
         "column_hash": saved_hash,
         "data_freshness": datetime.utcnow().isoformat() + "Z",
         "trained_at": artifact.get("trained_at", ""),
         "drift_score": 0.0,
-        "prediction_horizon": CONFIG.prediction_horizon,
+        "prediction_horizon": trained_horizon,
         "metrics": metrics,
         "components": {
             "xgb_prob": float(xgb_prob),

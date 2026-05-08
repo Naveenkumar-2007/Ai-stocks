@@ -100,6 +100,21 @@ SUFFIX_EXCHANGE_COUNTRY = {
     '.MI': ('Borsa Italiana', 'Italy')
 }
 
+PREDICTION_HORIZONS = (1, 7, 14)
+
+
+def _normalize_prediction_days(raw_days) -> int:
+    """Keep forecasts on the production-supported horizons: 1, 7, or 14 days."""
+    try:
+        requested = int(raw_days)
+    except (TypeError, ValueError):
+        return 7
+    if requested <= 1:
+        return 1
+    if requested <= 7:
+        return 7
+    return 14
+
 
 def _parse_env_list(value: str | None, default: list[str]) -> list[str]:
     if not value:
@@ -957,8 +972,7 @@ def get_stock_data(ticker):
         search_symbols
     )
     
-    days = request.args.get('days', default=7, type=int)
-    days = max(1, min(days, 30))  # Limit between 1-30 days
+    days = _normalize_prediction_days(request.args.get('days', default=7))
     
     try:
         requested_ticker = ticker.upper()
@@ -1648,6 +1662,100 @@ def get_stock_data(ticker):
                 'drift_score': 0.0,
             }
 
+        cached_payload = _ultimate_prediction_cache.get(resolved_ticker.upper()) or {}
+        price_range_low = cached_payload.get('price_range_low', []) if isinstance(cached_payload, dict) else []
+        price_range_high = cached_payload.get('price_range_high', []) if isinstance(cached_payload, dict) else []
+        price_range_q25 = cached_payload.get('price_range_q25', []) if isinstance(cached_payload, dict) else []
+        price_range_q75 = cached_payload.get('price_range_q75', []) if isinstance(cached_payload, dict) else []
+
+        def _build_fallback_price_ranges(price_path):
+            """Create conservative forecast ranges when quantile models are unavailable."""
+            if not price_path:
+                return [], [], [], []
+
+            closes = pd.to_numeric(hist.get('Close', pd.Series(dtype=float)), errors='coerce').dropna()
+            daily_vol = float(closes.pct_change().tail(30).std()) if len(closes) > 5 else 0.0
+            atr_value = indicators.get('atr') if isinstance(indicators, dict) else None
+            atr_pct = float(atr_value) / float(current_price) if atr_value and current_price else 0.0
+            daily_uncertainty = max(0.006, min(0.08, max(daily_vol, atr_pct * 0.60)))
+
+            lows, highs, q25s, q75s = [], [], [], []
+            for idx, center in enumerate(price_path[:days]):
+                center = float(center)
+                scale = (idx + 1) ** 0.5
+                p10_90_width = center * daily_uncertainty * 1.28 * scale
+                p25_75_width = center * daily_uncertainty * 0.67 * scale
+                lows.append(round(max(0.01, center - p10_90_width), 2))
+                highs.append(round(max(0.01, center + p10_90_width), 2))
+                q25s.append(round(max(0.01, center - p25_75_width), 2))
+                q75s.append(round(max(0.01, center + p25_75_width), 2))
+
+            return lows, highs, q25s, q75s
+
+        if predictions and (len(price_range_low) < len(predictions) or len(price_range_high) < len(predictions)):
+            price_range_low, price_range_high, price_range_q25, price_range_q75 = _build_fallback_price_ranges(predictions)
+
+        # Validate and normalize all range arrays. The UI should always receive
+        # a range around the model midpoint instead of a naked exact forecast.
+        for idx, center in enumerate(predictions[:days]):
+            center = float(center)
+            if idx >= len(price_range_low) or idx >= len(price_range_high):
+                continue
+
+            low = safe_float(price_range_low[idx])
+            high = safe_float(price_range_high[idx])
+            if low is None or high is None:
+                continue
+
+            low, high = sorted((float(low), float(high)))
+            low = min(low, center)
+            high = max(high, center)
+            price_range_low[idx] = safe_float(low)
+            price_range_high[idx] = safe_float(high)
+
+            if idx < len(price_range_q25):
+                q25 = safe_float(price_range_q25[idx])
+                price_range_q25[idx] = safe_float(max(low, min(center, float(q25)))) if q25 is not None else None
+            if idx < len(price_range_q75):
+                q75 = safe_float(price_range_q75[idx])
+                price_range_q75[idx] = safe_float(min(high, max(center, float(q75)))) if q75 is not None else None
+
+        if predictions and not future_predictions:
+            prev_price = current_price
+            for index, price in enumerate(predictions[:days]):
+                exp_change = price - prev_price
+                exp_change_pct = (exp_change / prev_price) * 100 if prev_price else 0
+                pred_date = get_trading_date(last_hist_date, index + 1)
+                future_predictions.append({
+                    'date': pred_date.strftime('%Y-%m-%d'),
+                    'price': safe_float(price),
+                    'expected_change': safe_float(exp_change),
+                    'expected_change_pct': safe_float(exp_change_pct, 3),
+                })
+                prev_price = price
+
+        for index, row in enumerate(future_predictions):
+            if index < len(price_range_low):
+                row['range_low'] = safe_float(price_range_low[index])
+            if index < len(price_range_high):
+                row['range_high'] = safe_float(price_range_high[index])
+            if index < len(price_range_q25):
+                row['range_q25'] = safe_float(price_range_q25[index])
+            if index < len(price_range_q75):
+                row['range_q75'] = safe_float(price_range_q75[index])
+
+        prediction_chart = {
+            'dates': [row.get('date') for row in future_predictions],
+            'median': [row.get('price') for row in future_predictions],
+            'range_low': [row.get('range_low') for row in future_predictions],
+            'range_high': [row.get('range_high') for row in future_predictions],
+            'range_q25': [row.get('range_q25') for row in future_predictions],
+            'range_q75': [row.get('range_q75') for row in future_predictions],
+            'direction_prob': safe_float(v2_payload.get('direction_prob') if isinstance(v2_payload, dict) else 0.5, 4),
+            'confidence': safe_float(v2_payload.get('confidence') if isinstance(v2_payload, dict) else 0.0, 4),
+            'model_version': v2_payload.get('model_version') if isinstance(v2_payload, dict) else None,
+        }
+
         recommendation_payload = final_decision.to_dict() if final_decision else {
             'signal': ai_signal,
             'stance': 'Training In Progress' if not trained_prediction_ready else 'Uncertain Market',
@@ -1688,11 +1796,14 @@ def get_stock_data(ticker):
             'market_cap': market_cap,
             'pe_ratio': safe_float(pe_ratio) if isinstance(pe_ratio, (int, float)) and not pd.isna(pe_ratio) else None,
             'days_predicted': days,
+            'supported_prediction_horizons': list(PREDICTION_HORIZONS),
             'indicators': indicators,
             'sentiment': sentiment_data,
             'model_info': model_info_data,
             'historical_data': historical_data,
             'future_predictions': future_predictions,
+            'prediction_chart': prediction_chart,
+            'signal_diagnostics': recommendation_payload,
             'technical_chart': {
                 'candles': candlestick_data,
                 'volumes': volume_data,
@@ -1712,11 +1823,11 @@ def get_stock_data(ticker):
             'performance': performance,
             'performance_chart': performance_chart,
             # Price RANGES from quantile regression (like real trading apps)
-            'price_range_low': cached_payload.get('price_range_low', []) if (cached_payload := _ultimate_prediction_cache.get(resolved_ticker.upper())) else [],
-            'price_range_high': cached_payload.get('price_range_high', []) if (cached_payload := _ultimate_prediction_cache.get(resolved_ticker.upper())) else [],
-            'price_range_q25': cached_payload.get('price_range_q25', []) if (cached_payload := _ultimate_prediction_cache.get(resolved_ticker.upper())) else [],
-            'price_range_q75': cached_payload.get('price_range_q75', []) if (cached_payload := _ultimate_prediction_cache.get(resolved_ticker.upper())) else [],
-            'quantile_returns': cached_payload.get('quantile_returns', {}) if (cached_payload := _ultimate_prediction_cache.get(resolved_ticker.upper())) else {},
+            'price_range_low': price_range_low,
+            'price_range_high': price_range_high,
+            'price_range_q25': price_range_q25,
+            'price_range_q75': price_range_q75,
+            'quantile_returns': cached_payload.get('quantile_returns', {}) if isinstance(cached_payload, dict) else {},
             'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         }
 
@@ -1869,6 +1980,7 @@ def unified_engine_status():
             'model_dir': str(model_dir),
             'config': {
                 'prediction_horizon': CONFIG.prediction_horizon,
+                'supported_prediction_horizons': list(PREDICTION_HORIZONS),
                 'fetch_days': CONFIG.fetch_days,
                 'purge_days': CONFIG.wf_purge_days,
                 'embargo_days': CONFIG.wf_embargo_days,

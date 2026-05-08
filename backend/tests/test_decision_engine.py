@@ -138,6 +138,46 @@ class DecisionEngineTests(unittest.TestCase):
             "HOLD",
         )
 
+    def test_low_validation_quality_blocks_weak_directional_trade(self):
+        hist = make_history(drift=0.001, vol=0.009)
+        current = float(hist["Close"].iloc[-1])
+        indicators = base_indicators(current)
+        indicators.update({
+            "rsi": 55.0,
+            "ema": current * 0.99,
+            "macd": 0.10,
+            "macd_signal": 0.04,
+            "macd_histogram": 0.06,
+            "sma20": current * 0.99,
+            "sma50": current * 0.97,
+        })
+
+        decision = build_decision(
+            hist=hist,
+            current_price=current,
+            predictions=[current * 1.015],
+            indicators=indicators,
+            sentiment={"score": 0.35, "buzz_articles": 8, "buzz_score": 0.8},
+            model_payload={
+                "prediction": 0.015,
+                "lower_95": -0.01,
+                "upper_95": 0.04,
+                "confidence": 0.58,
+                "direction_prob": 0.61,
+                "metrics": {
+                    "auc": 0.50,
+                    "fold_mean_accuracy": 51.0,
+                    "binom_pvalue": 0.40,
+                    "overfit_risk": "high",
+                    "underfit_risk": "medium",
+                    "brier_score": 0.31,
+                },
+            },
+        )
+
+        self.assertEqual(decision.signal, "HOLD")
+        self.assertIn("Validation quality", " ".join(decision.reasons))
+
 
 if __name__ == "__main__":
     unittest.main()

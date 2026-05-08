@@ -151,11 +151,15 @@ if HAS_MPL:
         m = r.metrics
         metrics_text = [
             ("Accuracy",  f"{m.get('accuracy',0):.1f}%"),
+            ("Train Acc", f"{m.get('fold_mean_train_accuracy',0):.1f}%"),
+            ("Gen Gap",   f"{m.get('mean_generalization_gap',0):.1f}%"),
             ("AUC-ROC",   f"{m.get('auc',0):.3f}"),
             ("Precision",  f"{m.get('precision',0):.1f}%"),
             ("Recall",     f"{m.get('recall',0):.1f}%"),
             ("F1 Score",   f"{m.get('f1',0):.1f}%"),
             ("p-value",    f"{m.get('binom_pvalue',1):.4f}"),
+            ("Overfit",    str(m.get('overfit_risk','n/a')).upper()),
+            ("Underfit",   str(m.get('underfit_risk','n/a')).upper()),
             ("Samples",    f"{m.get('training_samples',0):,}"),
             ("Features",   f"{len(r.selected_features)}"),
             ("Folds",      f"{m.get('n_folds',0)}"),
@@ -164,7 +168,7 @@ if HAS_MPL:
             row = i // 3
             col = i % 3
             x = 0.05 + col * 0.33
-            y = 0.85 - row * 0.30
+            y = 0.88 - row * 0.22
             ax3.text(x, y, label, fontsize=9, color="#94a3b8", transform=ax3.transAxes)
             ax3.text(x, y - 0.10, value, fontsize=14, color="#38bdf8",
                      transform=ax3.transAxes, fontweight="bold")
