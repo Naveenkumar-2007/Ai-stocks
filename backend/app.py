@@ -1843,24 +1843,25 @@ def get_stock_data(ticker):
         market_cap = company_profile.get('market_cap')
         if not isinstance(market_cap, (int, float)) or pd.isna(market_cap) or market_cap <= 0:
             market_cap = None
-        currency = (company_profile.get('currency') or '').upper() if isinstance(company_profile, dict) else ''
-        if not currency:
-            country_key = (resolved_country or company_profile.get('country') or '').upper() if isinstance(company_profile, dict) else (resolved_country or '').upper()
-            exchange_key = (resolved_exchange or company_profile.get('exchange') or '').upper() if isinstance(company_profile, dict) else (resolved_exchange or '').upper()
-            if resolved_ticker.endswith(('.NS', '.BO')) or 'INDIA' in country_key or 'NSE' in exchange_key or 'BSE' in exchange_key:
-                currency = 'INR'
-            elif resolved_ticker.endswith('.L') or 'LONDON' in exchange_key or 'UNITED KINGDOM' in country_key:
-                currency = 'GBP'
-            elif resolved_ticker.endswith('.TO') or 'TORONTO' in exchange_key or 'CANADA' in country_key:
-                currency = 'CAD'
-            elif resolved_ticker.endswith('.AX') or 'AUSTRALIA' in country_key:
-                currency = 'AUD'
-            elif resolved_ticker.endswith('.T') or 'TOKYO' in exchange_key or 'JAPAN' in country_key:
-                currency = 'JPY'
-            elif resolved_ticker.endswith('.HK') or 'HONG KONG' in country_key:
-                currency = 'HKD'
-            else:
-                currency = 'USD'
+        profile_currency = (company_profile.get('currency') or '').upper() if isinstance(company_profile, dict) else ''
+        country_key = (resolved_country or company_profile.get('country') or '').upper() if isinstance(company_profile, dict) else (resolved_country or '').upper()
+        exchange_key = (resolved_exchange or company_profile.get('exchange') or '').upper() if isinstance(company_profile, dict) else (resolved_exchange or '').upper()
+        # Prefer exchange suffix/country over profile defaults. Some providers return
+        # USD for non-US tickers even when OHLCV prices are already in local currency.
+        if resolved_ticker.endswith(('.NS', '.BO')) or 'INDIA' in country_key or 'NSE' in exchange_key or 'BSE' in exchange_key:
+            currency = 'INR'
+        elif resolved_ticker.endswith('.L') or 'LONDON' in exchange_key or 'UNITED KINGDOM' in country_key:
+            currency = 'GBP'
+        elif resolved_ticker.endswith('.TO') or 'TORONTO' in exchange_key or 'CANADA' in country_key:
+            currency = 'CAD'
+        elif resolved_ticker.endswith('.AX') or 'AUSTRALIA' in country_key:
+            currency = 'AUD'
+        elif resolved_ticker.endswith('.T') or 'TOKYO' in exchange_key or 'JAPAN' in country_key:
+            currency = 'JPY'
+        elif resolved_ticker.endswith('.HK') or 'HONG KONG' in country_key:
+            currency = 'HKD'
+        else:
+            currency = profile_currency or 'USD'
         pe_ratio = company_metrics.get('pe_ratio') if isinstance(company_metrics, dict) else None
         volume = int(hist['Volume'].iloc[-1]) if 'Volume' in hist.columns else 0
 
