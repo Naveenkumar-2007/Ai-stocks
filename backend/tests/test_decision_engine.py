@@ -111,6 +111,45 @@ class DecisionEngineTests(unittest.TestCase):
         self.assertGreaterEqual(decision.confidence, 0.38)
         self.assertGreater(decision.expected_move_pct, decision.min_required_move_pct)
 
+    def test_aligned_bearish_forecast_can_sell(self):
+        hist = make_history(drift=-0.0014, vol=0.010)
+        current = float(hist["Close"].iloc[-1])
+        indicators = base_indicators(current)
+        indicators.update(
+            {
+                "rsi": 68.0,
+                "ema": current * 1.025,
+                "macd": -0.18,
+                "macd_signal": -0.05,
+                "macd_histogram": -0.13,
+                "sma20": current * 1.020,
+                "sma50": current * 1.045,
+            }
+        )
+
+        decision = build_decision(
+            hist=hist,
+            current_price=current,
+            predictions=[current * 0.955],
+            indicators=indicators,
+            sentiment={
+                "score": -0.70,
+                "buzz_articles": 12,
+                "buzz_score": 1.0,
+            },
+            model_payload={
+                "prediction": -0.045,
+                "lower_95": -0.082,
+                "upper_95": -0.010,
+                "confidence": 0.78,
+                "direction_prob": 0.24,
+            },
+        )
+
+        self.assertIn(decision.signal, {"SELL", "STRONG SELL"})
+        self.assertLess(decision.expected_move_pct, -decision.min_required_move_pct)
+        self.assertLess(decision.score, 0)
+
     def test_forecast_rows_cannot_contradict_final_hold(self):
         hist = make_history()
         current = float(hist["Close"].iloc[-1])

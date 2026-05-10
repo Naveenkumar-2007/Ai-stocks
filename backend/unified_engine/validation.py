@@ -58,6 +58,27 @@ def walk_forward_splits(
     Returns:
         List of WalkForwardSplit objects
     """
+    if n_samples <= purge_days + 30:
+        return []
+
+    # Many international and recently listed tickers have enough data to train
+    # but not enough for the production-sized 2y/3m validation windows. Keep the
+    # purge rule intact, then shrink only the window sizes so first-time ticker
+    # training can complete instead of failing before model fitting starts.
+    required_for_default = min_train + purge_days + (CONFIG.wf_min_folds * test_window)
+    if n_samples < required_for_default:
+        available_after_purge = max(0, n_samples - purge_days)
+        adaptive_test = max(10, min(test_window, available_after_purge // (CONFIG.wf_min_folds + 3)))
+        adaptive_min_train = max(
+            120,
+            min(min_train, n_samples - purge_days - (CONFIG.wf_min_folds * adaptive_test))
+        )
+
+        if adaptive_min_train + purge_days + adaptive_test <= n_samples:
+            min_train = adaptive_min_train
+            test_window = adaptive_test
+            step_size = max(5, min(step_size, adaptive_test // 2))
+
     splits = []
     fold_num = 0
     test_start = min_train + purge_days

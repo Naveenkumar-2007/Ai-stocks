@@ -1,13 +1,22 @@
-import os, json, sys
+import os, json, sys, shutil
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 
 backend_dir = os.path.dirname(os.path.abspath(__file__))
-json_path = os.path.join(backend_dir, "monitoring", "reports", "multimarket_summary.json")
+report_dir = os.path.join(backend_dir, "monitoring", "reports")
+artifact_chart_dir = os.path.join(backend_dir, "artifacts", "model_charts")
+os.makedirs(report_dir, exist_ok=True)
+os.makedirs(artifact_chart_dir, exist_ok=True)
 
-if not os.path.exists(json_path):
-    print(f"Error: {json_path} not found.")
+json_candidates = [
+    os.path.join(artifact_chart_dir, "multimarket_summary.json"),
+    os.path.join(report_dir, "multimarket_summary.json"),
+]
+json_path = next((path for path in json_candidates if os.path.exists(path)), None)
+
+if not json_path:
+    print("Error: multimarket_summary.json not found in artifacts/model_charts or monitoring/reports.")
     sys.exit(1)
 
 with open(json_path, "r", encoding="utf-8") as f:
@@ -18,7 +27,7 @@ if not stocks:
     print("No successful stocks found.")
     sys.exit(1)
 
-# Sort stocks from Best to Lowest based on Accuracy
+# Sort stocks from best to lowest based on walk-forward accuracy.
 stocks.sort(key=lambda x: x["metrics"].get("accuracy", 0), reverse=True)
 
 # Extract real metrics only (walk-forward validation)
@@ -61,7 +70,10 @@ def get_color(val, threshold1=60, threshold2=55):
     if val >= 50: return "#f59e0b" # Orange
     return "#ef4444" # Red
 
-short_tickers = [t.replace(".NS", "") for t in tickers]
+def display_ticker(ticker):
+    return ticker.replace(".NS", "")
+
+short_tickers = [display_ticker(t) for t in tickers]
 
 # 1. Accuracy
 ax1 = fig.add_subplot(gs[0, 0])
@@ -141,9 +153,14 @@ for (row, col), cell in table.get_celld().items():
         cell.set_text_props(color="#e2e8f0")
     cell.set_edgecolor("#334155")
 
-out_path = os.path.join(backend_dir, "monitoring", "reports", "ultimate_v52_dashboard.png")
+out_path = os.path.join(report_dir, "ai_stock_forecasting_performance_monitor.png")
+legacy_path = os.path.join(report_dir, "ultimate_v52_dashboard.png")
 fig.savefig(out_path, dpi=150, bbox_inches="tight", facecolor=fig.get_facecolor())
-print(f"Chart generated successfully: {out_path}")
+fig.savefig(legacy_path, dpi=150, bbox_inches="tight", facecolor=fig.get_facecolor())
+for chart_path in (out_path, legacy_path):
+    shutil.copy2(chart_path, os.path.join(artifact_chart_dir, os.path.basename(chart_path)))
+print(f"Performance monitor generated: {out_path}")
+print(f"Copied dashboard artifacts to: {artifact_chart_dir}")
 
 # Optional: signal/sentiment overview from evaluation report
 signal_json = os.path.join(backend_dir, "monitoring", "reports", "top10_signal_evaluation.json")
@@ -202,8 +219,9 @@ if os.path.exists(signal_json):
             ax_s4.grid(True, axis="y")
             ax_s4.tick_params(axis="x", rotation=35)
 
-            signal_out = os.path.join(backend_dir, "monitoring", "reports", "top10_signal_overview.png")
+            signal_out = os.path.join(report_dir, "top10_signal_overview.png")
             fig2.savefig(signal_out, dpi=150, bbox_inches="tight", facecolor=fig.get_facecolor())
+            shutil.copy2(signal_out, os.path.join(artifact_chart_dir, os.path.basename(signal_out)))
             plt.close(fig2)
             print(f"Signal overview chart generated: {signal_out}")
     except Exception as exc:

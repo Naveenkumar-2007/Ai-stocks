@@ -1,13 +1,13 @@
 """
 =============================================================================
- COMPREHENSIVE MULTI-MARKET TRAINING + MONITORING v5.2
+ COMPREHENSIVE US + INDIA TRAINING + MONITORING v5.2
 =============================================================================
- Trains on 10 diverse stocks across US, India, UK, and other markets,
+ Trains on 5 top US stocks and 5 top India stocks,
  then generates detailed per-stock and combined monitoring charts.
 =============================================================================
 """
 
-import sys, os, json, warnings, time
+import sys, os, json, warnings, time, shutil
 from datetime import datetime
 
 warnings.filterwarnings("ignore")
@@ -24,19 +24,19 @@ except ImportError:
     pass
 
 # ===========================================================================
-#  STOCKS: 5 US + 3 India + 2 UK/Global
+#  STOCKS: 5 US + 5 India
 # ===========================================================================
 STOCKS = [
     # --- US Mega-Caps ---
     "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA",
-    # --- India (NSE) ---
-    "RELIANCE.NS", "TCS.NS", "INFY.NS",
-    # --- UK / Global ---
-    "TSLA", "META",
+    # --- India Large-Caps (NSE) ---
+    "RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "INFY.NS", "ICICIBANK.NS",
 ]
 
 CHART_DIR = os.path.join(backend_dir, "monitoring", "reports")
+ARTIFACT_CHART_DIR = os.path.join(backend_dir, "artifacts", "model_charts")
 os.makedirs(CHART_DIR, exist_ok=True)
+os.makedirs(ARTIFACT_CHART_DIR, exist_ok=True)
 
 # ===========================================================================
 #  TRAIN ALL STOCKS
@@ -189,6 +189,7 @@ if HAS_MPL:
 
         chart_path = os.path.join(CHART_DIR, f"{ticker.replace('.', '_')}_monitoring.png")
         fig.savefig(chart_path, dpi=150, bbox_inches="tight")
+        shutil.copy2(chart_path, os.path.join(ARTIFACT_CHART_DIR, os.path.basename(chart_path)))
         plt.close(fig)
         print(f"  ✅ {ticker} chart → {chart_path}")
 
@@ -297,6 +298,7 @@ if HAS_MPL:
 
         combined_path = os.path.join(CHART_DIR, "combined_multimarket_monitoring.png")
         fig.savefig(combined_path, dpi=150, bbox_inches="tight")
+        shutil.copy2(combined_path, os.path.join(ARTIFACT_CHART_DIR, os.path.basename(combined_path)))
         plt.close(fig)
         print(f"\n  ✅ Combined dashboard → {combined_path}")
 
@@ -330,6 +332,7 @@ if HAS_MPL:
         plt.setp(plt.getp(cbar.ax.axes, "yticklabels"), color="#94a3b8")
         hm_path = os.path.join(CHART_DIR, "multimarket_heatmap.png")
         fig.savefig(hm_path, dpi=150, bbox_inches="tight")
+        shutil.copy2(hm_path, os.path.join(ARTIFACT_CHART_DIR, os.path.basename(hm_path)))
         plt.close(fig)
         print(f"  ✅ Heatmap → {hm_path}")
 
@@ -353,6 +356,7 @@ summary = {
 json_path = os.path.join(CHART_DIR, "multimarket_summary.json")
 with open(json_path, "w", encoding="utf-8") as f:
     json.dump(summary, f, indent=2)
+shutil.copy2(json_path, os.path.join(ARTIFACT_CHART_DIR, os.path.basename(json_path)))
 print(f"\n  ✅ JSON → {json_path}")
 
 # ===========================================================================
@@ -386,4 +390,5 @@ if successful:
 if failed:
     print(f"\n  Failed: {', '.join(failed)}")
 print(f"\n  Charts: {CHART_DIR}")
+print(f"  Artifact charts: {ARTIFACT_CHART_DIR}")
 print("=" * 80 + "\n")

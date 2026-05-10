@@ -145,7 +145,13 @@ def _run_inference(ticker, artifact, hist, current_price, days):
 
     # Magnitude prediction (median)
     lgbm_mag = float(lgbm_model.predict(X_latest)[0])
-    lgbm_dir_prob = 1.0 if lgbm_mag > 0 else 0.0
+    if "lgbm_mag_scale" in artifact:
+        mag_scale = max(float(artifact.get("lgbm_mag_scale") or 0.01), 0.0025)
+        lgbm_dir_prob = float(np.clip(0.5 + 0.5 * np.tanh(lgbm_mag / mag_scale), 0.01, 0.99))
+    else:
+        # Backward compatibility for older artifacts whose meta-learner was
+        # trained with a binary magnitude-direction input.
+        lgbm_dir_prob = 1.0 if lgbm_mag > 0 else 0.0
 
     # v5.2: Dual XGBoost + RandomForest probability
     xgb_model_2 = artifact.get("xgb_model_2")

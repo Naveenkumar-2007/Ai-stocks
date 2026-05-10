@@ -263,16 +263,25 @@ def build_decision(
     volume_score = volume_confirmation * _clamp(np.sign(expected_move_pct or ml_score))
 
     volatility_penalty = min(0.30, max(0.0, (market["daily_vol_pct"] - 3.5) / 22.0))
+    min_required_move_pct = max(0.25, market["atr_pct"] * 0.25, market["daily_vol_pct"] * 0.30)
+    forecast_edge_score = _clamp(expected_move_pct / max(min_required_move_pct * 3.0, 1e-9))
+
+    # Direction probability can become structurally bullish on long bull-market
+    # training windows. The signed forecast edge keeps bearish quantile/magnitude
+    # forecasts from being hidden as HOLD just because the classifier is timid.
+    if forecast_edge_score * ml_score < -0.10 and abs(expected_move_pct) >= min_required_move_pct:
+        ml_score *= 0.60
+
     raw_score = (
-        0.45 * ml_score
-        + 0.22 * technical_score
-        + 0.17 * sentiment_score
-        + 0.11 * momentum_score
-        + 0.05 * volume_score
+        0.34 * ml_score
+        + 0.24 * forecast_edge_score
+        + 0.18 * technical_score
+        + 0.13 * sentiment_score
+        + 0.08 * momentum_score
+        + 0.03 * volume_score
     )
     final_score = _clamp(raw_score - volatility_penalty * np.sign(raw_score))
 
-    min_required_move_pct = max(0.25, market["atr_pct"] * 0.25, market["daily_vol_pct"] * 0.30)
     move_quality = min(1.0, abs(expected_move_pct) / max(min_required_move_pct * 2.0, 1e-9))
     interval_quality = max(0.0, min(1.0, 1.0 - (ci_width_pct / max(abs(expected_move_pct) * 4.0 + 1.0, 1.0))))
     agreement = 1.0 - (np.std([ml_score, technical_score, sentiment_score, momentum_score]) / 1.2)
@@ -350,6 +359,7 @@ def build_decision(
         reasons=reasons[:4],
         components={
             "ml": round(float(ml_score), 4),
+            "forecast_edge": round(float(forecast_edge_score), 4),
             "technical": round(float(technical_score), 4),
             "sentiment": round(float(sentiment_score), 4),
             "sentiment_quality": round(float(sentiment_quality), 4),

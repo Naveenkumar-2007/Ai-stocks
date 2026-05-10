@@ -118,6 +118,15 @@ def _compute_sample_weights(dates_index, halflife_days=CONFIG.sample_weight_half
     """Exponential decay: recent samples get higher weight."""
     if not CONFIG.use_sample_weights:
         return None
+    try:
+        dates = pd.to_datetime(dates_index)
+        days_ago = (dates.max() - dates).days.values.astype(float)
+        decay_rate = np.log(2) / halflife_days
+        weights = np.exp(-decay_rate * days_ago)
+        weights = weights / weights.mean()  # normalize so mean=1
+        return weights
+    except Exception:
+        return None
 
 
 def _adaptive_scale_pos_weight(y_values) -> float:
@@ -137,6 +146,12 @@ def _safe_auc(y_true, probs) -> float:
         return 0.5
 
 
+def _magnitude_to_direction_probability(magnitude_values, scale: float):
+    """Convert signed return magnitude into a smooth up/down probability."""
+    scale = max(float(scale or 0.01), 0.0025)
+    return np.clip(0.5 + 0.5 * np.tanh(np.asarray(magnitude_values, dtype=float) / scale), 0.01, 0.99)
+
+
 def _fit_xgb_classifier(model, X_fit, y_fit, sample_weight=None, X_eval=None, y_eval=None):
     """Fit XGBoost with early stopping only when the validation fold is usable."""
     if X_eval is not None and y_eval is not None and len(np.unique(y_eval)) >= 2 and len(np.unique(y_fit)) >= 2:
@@ -148,15 +163,6 @@ def _fit_xgb_classifier(model, X_fit, y_fit, sample_weight=None, X_eval=None, y_
         model.set_params(early_stopping_rounds=None)
         model.fit(X_fit, y_fit, sample_weight=sample_weight, verbose=False)
     return model
-    try:
-        dates = pd.to_datetime(dates_index)
-        days_ago = (dates.max() - dates).days.values.astype(float)
-        decay_rate = np.log(2) / halflife_days
-        weights = np.exp(-decay_rate * days_ago)
-        weights = weights / weights.mean()  # normalize so mean=1
-        return weights
-    except Exception:
-        return None
 
 
 def train_unified_model(ticker: str, generate_charts: bool = False) -> TrainResult:
@@ -329,6 +335,8 @@ def train_unified_model(ticker: str, generate_charts: bool = False) -> TrainResu
             callbacks=[lgb.early_stopping(30, verbose=False)],
         )
         fold_preds_mag = lgbm_model.predict(X_te)
+        fold_mag_scale = float(np.nanmedian(np.abs(y_mag_tr))) if len(y_mag_tr) else 0.01
+        fold_lgbm_dir_prob = _magnitude_to_direction_probability(fold_preds_mag, fold_mag_scale)
 
         # RandomForest (diverse error patterns — decorrelates with GBMs)
         rf_model = RandomForestClassifier(
@@ -348,7 +356,7 @@ def train_unified_model(ticker: str, generate_charts: bool = False) -> TrainResu
 
         oof_probs_xgb[test_idx] = fold_probs_xgb
         oof_probs_xgb2[test_idx] = fold_probs_xgb2
-        oof_probs_lgbm[test_idx] = (fold_preds_mag > 0).astype(float)
+        oof_probs_lgbm[test_idx] = fold_lgbm_dir_prob
         oof_probs_rf[test_idx] = fold_probs_rf
         oof_preds_mag[test_idx] = fold_preds_mag
         oof_actuals_dir[test_idx] = y_dir_te
@@ -359,17 +367,18 @@ def train_unified_model(ticker: str, generate_charts: bool = False) -> TrainResu
             0.35 * fold_probs_xgb +
             0.15 * fold_probs_xgb2 +
             0.20 * fold_probs_rf +
-            0.30 * (fold_preds_mag > 0).astype(float)
+            0.30 * fold_lgbm_dir_prob
         )
         train_probs_xgb = xgb_model.predict_proba(X_tr)[:, 1]
         train_probs_xgb2 = xgb2_model.predict_proba(X_tr)[:, 1]
         train_preds_mag = lgbm_model.predict(X_tr)
         train_probs_rf = rf_model.predict_proba(X_tr)[:, 1]
+        train_lgbm_dir_prob = _magnitude_to_direction_probability(train_preds_mag, fold_mag_scale)
         train_ensemble_prob = (
             0.35 * train_probs_xgb +
             0.15 * train_probs_xgb2 +
             0.20 * train_probs_rf +
-            0.30 * (train_preds_mag > 0).astype(float)
+            0.30 * train_lgbm_dir_prob
         )
         train_acc = accuracy_score(y_dir_tr, (train_ensemble_prob >= 0.5).astype(int))
         fold_acc = accuracy_score(y_dir_te, (fold_ensemble_prob >= 0.5).astype(int))
@@ -484,6 +493,8 @@ def train_unified_model(ticker: str, generate_charts: bool = False) -> TrainResu
     valid_mag = oof_actuals_mag[valid_mask]
     avg_abs_return = float(np.nanmean(np.abs(valid_mag))) if len(valid_mag) > 0 else 0.02
     avg_abs_return = max(0.005, min(avg_abs_return, 0.15))
+    lgbm_mag_scale = float(np.nanmedian(np.abs(valid_mag))) if len(valid_mag) > 0 else avg_abs_return
+    lgbm_mag_scale = max(0.0025, min(lgbm_mag_scale, 0.15))
 
     residuals = oof_actuals_mag[valid_mask] - oof_preds_mag[valid_mask]
     residuals = residuals[~np.isnan(residuals)]
@@ -564,6 +575,7 @@ def train_unified_model(ticker: str, generate_charts: bool = False) -> TrainResu
         "feature_importance": importance,
         "buy_threshold": buy_threshold, "sell_threshold": sell_threshold,
         "avg_abs_return": avg_abs_return,
+        "lgbm_mag_scale": lgbm_mag_scale,
         "residual_quantiles": residual_quantiles,
         "metrics": {
             "accuracy": float(accuracy * 100), "balanced_accuracy": float(balanced_accuracy * 100),

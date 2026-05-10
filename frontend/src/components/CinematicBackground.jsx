@@ -298,7 +298,7 @@ export default function CinematicBackground() {
                 inset: 0,
                 zIndex: 0,
                 pointerEvents: 'none',
-                opacity: 1
+                opacity: isDark ? 0.26 : 0.14
             }}
         />
     );

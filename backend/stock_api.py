@@ -231,6 +231,74 @@ def _normalize_symbol(symbol: str) -> str:
     return base
 
 
+COMPANY_ALIAS_OVERRIDES = {
+    'AAPL': ['apple'],
+    'MSFT': ['microsoft'],
+    'GOOGL': ['alphabet', 'google'],
+    'GOOG': ['alphabet', 'google'],
+    'AMZN': ['amazon'],
+    'NVDA': ['nvidia'],
+    'TSLA': ['tesla'],
+    'META': ['meta platforms', 'facebook', 'instagram'],
+    'ORCL': ['oracle'],
+    'RELIANCE': ['reliance industries', 'reliance'],
+    'TCS': ['tata consultancy', 'tcs'],
+    'INFY': ['infosys'],
+    'HDFCBANK': ['hdfc bank'],
+    'ICICIBANK': ['icici bank'],
+}
+
+
+def _company_terms_for_ticker(ticker: str, company_name: str | None = None) -> list[str]:
+    base = _normalize_symbol(ticker)
+    terms = {base.lower()} if base else set()
+    terms.update(COMPANY_ALIAS_OVERRIDES.get(base, []))
+    if company_name:
+        cleaned = re.sub(r'\b(inc|corp|corporation|ltd|limited|plc|class a|common stock|ordinary shares)\b', '', company_name.lower())
+        cleaned = re.sub(r'[^a-z0-9\s&.-]', ' ', cleaned)
+        cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+        if len(cleaned) > 2:
+            terms.add(cleaned)
+            first_word = cleaned.split()[0]
+            if len(first_word) >= 4:
+                terms.add(first_word)
+    return sorted(term for term in terms if len(term) >= 2)
+
+
+def _article_relevance_score(article: dict, ticker: str, company_name: str | None = None) -> float:
+    """Score whether a news article is really about the searched stock."""
+    terms = _company_terms_for_ticker(ticker, company_name)
+    if not terms:
+        return 0.0
+
+    headline = str(article.get('headline', '') or '').lower()
+    summary = str(article.get('summary', '') or '').lower()
+    related = str(article.get('related', '') or article.get('symbol', '') or '').upper()
+    base = _normalize_symbol(ticker)
+
+    score = 0.0
+    if base and base in related.replace(',', ' ').split():
+        score += 3.0
+    for term in terms:
+        term_pattern = rf'(?<![a-z0-9]){re.escape(term)}(?![a-z0-9])'
+        if re.search(term_pattern, headline):
+            score += 3.0
+        if re.search(term_pattern, summary[:280]):
+            score += 1.0
+
+    # If another mega-cap dominates the headline and the searched company is
+    # only buried in the summary, keep it below first-page news.
+    competing_terms = [
+        term for symbol, aliases in COMPANY_ALIAS_OVERRIDES.items()
+        if symbol != base
+        for term in aliases[:2]
+    ]
+    if score < 3.0 and any(re.search(rf'(?<![a-z0-9]){re.escape(term)}(?![a-z0-9])', headline) for term in competing_terms):
+        score -= 1.0
+
+    return max(0.0, score)
+
+
 def _twelvedata_symbol_params(symbol: str, exchange: str | None = None) -> tuple[str, str | None]:
     """Translate Yahoo-style suffixes into Twelve Data symbol + exchange params."""
     cleaned = (symbol or '').strip().upper()
@@ -1087,61 +1155,46 @@ def get_company_news(ticker, days=7):
             print(f"No news found for {ticker}")
             return []
         
-        # Filter and format news articles - Be more lenient with relevance filtering
-        news_articles = []
+        # Filter and format news articles. Company-news providers can still
+        # return broad sector stories, so do not show weakly related articles
+        # as if they are ticker-specific news.
+        ranked_articles = []
         ticker_lower = ticker.lower()
         
-        for article in news_data[:15]:  # Check first 15 articles
-            headline = article.get('headline', '').lower()
-            summary = article.get('summary', '').lower()
-            
-            # Check if article is relevant to the searched stock
-            is_relevant = False
-            
-            # Check if ticker symbol is mentioned (case insensitive)
-            if ticker_lower in headline or ticker_lower in summary:
-                is_relevant = True
-            
-            # Check if company name is mentioned (if we have it)
-            if company_name and len(company_name) > 3:  # Avoid short names causing false matches
-                if company_name in headline or company_name in summary:
-                    is_relevant = True
-            
-            # If no company name match, be more lenient - include articles from the same sector
-            # Or just include all articles from the API response since Finnhub already filters by ticker
-            if not is_relevant and len(news_articles) < 5:  # At least show 5 news items
-                is_relevant = True  # Include all Finnhub company news since it's already filtered
-            
-            # Only add relevant articles
-            if is_relevant:
-                # Get timestamp and format date properly
-                timestamp = article.get('datetime', 0)
-                try:
-                    # Convert Unix timestamp to readable date
-                    if timestamp > 0:
-                        date_obj = datetime.fromtimestamp(timestamp)
-                        formatted_date = date_obj.strftime('%Y-%m-%d %H:%M')
-                    else:
-                        formatted_date = 'Unknown date'
-                except Exception as e:
-                    print(f"Error formatting date: {e}")
+        for article in news_data[:60]:
+            relevance = _article_relevance_score(article, ticker, company_name)
+            if relevance < 1.0:
+                continue
+
+            timestamp = article.get('datetime', 0)
+            try:
+                if timestamp > 0:
+                    date_obj = datetime.fromtimestamp(timestamp)
+                    formatted_date = date_obj.strftime('%Y-%m-%d %H:%M')
+                else:
                     formatted_date = 'Unknown date'
-                
-                news_articles.append({
-                    'headline': article.get('headline', 'No headline'),
-                    'summary': article.get('summary', 'No summary available'),
-                    'source': 'Finnhub',  # Always show Finnhub as source (no Yahoo)
-                    'url': article.get('url', '#'),
-                    'image': company_logo,  # ALWAYS use company logo for consistency
-                    'datetime': formatted_date,  # Properly formatted date
-                    'timestamp': timestamp,  # Keep original timestamp for sorting
-                    'related': ticker.upper(),  # Show the ticker being searched
-                    'company_name': company_name or ticker  # Include company name
-                })
-            
-            # Limit to 30 most recent relevant articles to support "Load more"
-            if len(news_articles) >= 30:
+            except Exception as e:
+                print(f"Error formatting date: {e}")
+                formatted_date = 'Unknown date'
+
+            ranked_articles.append((relevance, float(timestamp or 0), {
+                'headline': article.get('headline', 'No headline'),
+                'summary': article.get('summary', 'No summary available'),
+                'source': 'Finnhub',
+                'url': article.get('url', '#'),
+                'image': company_logo,
+                'datetime': formatted_date,
+                'timestamp': timestamp,
+                'related': ticker.upper(),
+                'company_name': company_name or ticker,
+                'relevance_score': round(float(relevance), 2),
+            }))
+
+            if len(ranked_articles) >= 30:
                 break
+
+        ranked_articles.sort(key=lambda item: (item[0], item[1]), reverse=True)
+        news_articles = [item[2] for item in ranked_articles]
         
         print(f"âœ… Fetched {len(news_articles)} relevant news articles for {ticker} from Finnhub only")
         print(f"All articles using company logo: {company_logo}")

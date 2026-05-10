@@ -26,11 +26,11 @@ TOP_10_TICKERS = [
     "GOOGL",
     "AMZN",
     "NVDA",
-    "TSLA",
-    "META",
-    "INFY.NS",
-    "TCS.NS",
     "RELIANCE.NS",
+    "TCS.NS",
+    "HDFCBANK.NS",
+    "INFY.NS",
+    "ICICIBANK.NS",
 ]
 
 

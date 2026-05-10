@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 import warnings
 import logging
 import threading
+import uuid
 from logging.handlers import RotatingFileHandler
 from functools import wraps
 from werkzeug.exceptions import HTTPException
@@ -27,6 +28,40 @@ except ImportError:  # Firebase admin is optional; admin endpoints will be disab
 from dotenv import load_dotenv
 
 load_dotenv()
+
+
+def _offline_chatbot_reply(message: str):
+    """Return a useful assistant response when the dedicated chatbot service is not running."""
+    text = (message or '').strip()
+    lower = text.lower()
+
+    if any(word in lower for word in ('hi', 'hello', 'hey', 'how it work', 'how its work', 'how does it work')):
+        reply = (
+            "Hey, welcome to Datavision. Here is how it works:\n\n"
+            "1. Enter a stock symbol like AAPL, NVDA, RELIANCE.NS, or 7203.T.\n"
+            "2. The app loads live market data, technical indicators, sentiment, and news.\n"
+            "3. If a ticker-specific ML model is ready, it shows the forecast range, signal, trust score, risk, and trading chart.\n"
+            "4. If the model is not ready yet, the page shows live analysis while the stock-specific forecast is prepared.\n"
+            "5. Use Opportunity Radar to compare multiple stocks and rank the best setup by risk-adjusted AI score.\n\n"
+            "Ask me for a stock prediction by typing something like: predict AAPL."
+        )
+    elif any(word in lower for word in ('predict', 'prediction', 'forecast', 'target', 'outlook')):
+        reply = (
+            "I can help with predictions. Please send the ticker you want, for example AAPL, NVDA, TSLA, "
+            "RELIANCE.NS, or 7203.T. The main prediction engine will then show live price, AI range, signal, trust, and risk."
+        )
+    else:
+        reply = (
+            "I can help explain this ML stock platform, compare watchlist stocks, or guide you to a prediction. "
+            "Try asking: predict AAPL, explain trust score, or how does Opportunity Radar work?"
+        )
+
+    return jsonify({
+        'reply': reply,
+        'stock': None,
+        'data': {'mode': 'fallback_assistant', 'reason': 'chatbot_service_unavailable'},
+        'chat_id': str(uuid.uuid4())
+    })
 
 
 def _proxy_chatbot(subpath: str):
@@ -54,6 +89,13 @@ def _proxy_chatbot(subpath: str):
         headers = {k: v for k, v in resp.headers.items() if k.lower() not in excluded_headers}
         return (resp.content, resp.status_code, headers)
     except _requests.exceptions.ConnectionError:
+        if subpath == '/chat' and request.method == 'POST':
+            payload = request.get_json(silent=True) or {}
+            return _offline_chatbot_reply(payload.get('message', ''))
+        if subpath == '/chats' and request.method == 'GET':
+            return jsonify({'chats': []})
+        if subpath == '/feedback' and request.method == 'POST':
+            return jsonify({'message': 'Feedback received locally. Dedicated chat learning service is offline.', 'rating': (request.get_json(silent=True) or {}).get('rating')})
         return jsonify({'error': 'Chatbot service is starting up or unavailable', 'detail': 'The chatbot server at port 8001 is not responding. It may still be initializing.'}), 503
     except Exception as e:
         return jsonify({'error': 'Chatbot service unavailable', 'detail': str(e)}), 503
@@ -101,6 +143,343 @@ SUFFIX_EXCHANGE_COUNTRY = {
 }
 
 PREDICTION_HORIZONS = (1, 7, 14)
+NON_TRAINABLE_SUFFIXES = ('.PVT',)
+
+
+def _is_trainable_market_ticker(ticker: str) -> bool:
+    ticker_key = (ticker or '').strip().upper()
+    if not ticker_key:
+        return False
+    return not ticker_key.endswith(NON_TRAINABLE_SUFFIXES)
+
+
+def _unsupported_training_message(ticker: str) -> str:
+    ticker_key = (ticker or '').strip().upper() or 'This symbol'
+    return (
+        f'{ticker_key} cannot be trained as an AI forecast model yet. '
+        'Datavision needs a public exchange-listed ticker with enough daily OHLCV history. '
+        'Search and choose the listed market symbol, for example AAPL, RELIANCE.NS, TCS.NS, or 7203.T.'
+    )
+
+
+def _training_failure_status(reason) -> tuple[str, str, str]:
+    """Classify training failures into user-facing pipeline states."""
+    raw_reason = str(reason or 'unknown training issue')
+    normalized = raw_reason.lower()
+    insufficient_history_terms = (
+        'no data', 'insufficient', 'not enough', 'empty', 'unsupported',
+        'private', 'delisted', 'no price', 'no history', 'failed download',
+        'possibly delisted', 'not found', 'symbol may be delisted'
+    )
+    if any(term in normalized for term in insufficient_history_terms):
+        return (
+            'untrainable',
+            'not_enough_market_history',
+            'This stock does not have enough reliable market history for a validated AI forecast. Try the exchange-listed ticker from search suggestions.'
+        )
+    return (
+        'failed',
+        'retry_available',
+        'Training stopped before validation completed. You can retry and Datavision will publish the forecast only after validation succeeds.'
+    )
+
+
+def _clamp_number(value, low=0.0, high=1.0):
+    try:
+        return max(low, min(high, float(value)))
+    except (TypeError, ValueError):
+        return low
+
+
+def _build_market_regime(hist, indicators, current_price):
+    """User-facing market regime label derived from trend, volatility, volume, and range state."""
+    try:
+        close = hist['Close'].dropna()
+        returns = close.pct_change().dropna()
+        vol_pct = float(returns.tail(20).std() * 100.0) if len(returns) >= 5 else 0.0
+        sma20 = float(indicators.get('sma20') or current_price)
+        sma50 = float(indicators.get('sma50') or sma20)
+        ema20 = float(indicators.get('ema') or sma20)
+        rsi = float(indicators.get('rsi') or 50.0)
+        adx = float(indicators.get('adx') or 0.0)
+        atr = float(indicators.get('atr') or 0.0)
+        atr_pct = (atr / current_price) * 100.0 if current_price and atr > 0 else vol_pct
+        momentum_20d = ((close.iloc[-1] / close.iloc[-21]) - 1.0) * 100.0 if len(close) > 21 and close.iloc[-21] else 0.0
+        volume = hist['Volume'].dropna() if 'Volume' in hist else []
+        avg_volume = float(volume.tail(20).mean()) if len(volume) >= 5 else 0.0
+        volume_ratio = float(volume.iloc[-1] / avg_volume) if avg_volume > 0 and len(volume) else 1.0
+        bb_upper = indicators.get('bb_upper')
+        bb_lower = indicators.get('bb_lower')
+        bb_width_pct = ((float(bb_upper) - float(bb_lower)) / current_price) * 100.0 if bb_upper and bb_lower and current_price else None
+        range_pct = ((close.tail(20).max() - close.tail(20).min()) / current_price) * 100.0 if len(close) >= 20 and current_price else vol_pct
+        trend_strength = _clamp_number((adx or 0.0) / 45.0, 0.0, 1.0)
+
+        if range_pct <= 5.0 and atr_pct <= 2.2 and (bb_width_pct is None or bb_width_pct <= 8.0):
+            label = 'Volatility Squeeze'
+            tone = 'neutral'
+        elif vol_pct >= 4.5 or atr_pct >= 5.5:
+            label = 'High Volatility'
+            tone = 'warning'
+        elif current_price > ema20 > sma50 and momentum_20d >= 6.0 and adx >= 25:
+            label = 'Momentum Leader'
+            tone = 'bullish'
+        elif current_price > ema20 and ema20 >= sma50 and momentum_20d > 2.0 and adx >= 18:
+            label = 'Bull Trend'
+            tone = 'bullish'
+        elif current_price < ema20 < sma50 and momentum_20d < -2.0 and volume_ratio >= 1.1:
+            label = 'Distribution'
+            tone = 'bearish'
+        elif current_price < ema20 < sma50 and momentum_20d < -2.0:
+            label = 'Bear Trend'
+            tone = 'bearish'
+        elif abs(momentum_20d) <= 2.0 and adx < 18:
+            label = 'Consolidation'
+            tone = 'neutral'
+        elif current_price > ema20 and momentum_20d > 0:
+            label = 'Recovery'
+            tone = 'bullish'
+        else:
+            label = 'Sideways'
+            tone = 'neutral'
+
+        return {
+            'label': label,
+            'tone': tone,
+            'daily_vol_pct': round(float(vol_pct), 2),
+            'atr_pct': round(float(atr_pct), 2),
+            'momentum_20d_pct': round(float(momentum_20d), 2),
+            'adx': round(float(adx), 2),
+            'trend_strength': round(float(trend_strength), 4),
+            'volume_ratio': round(float(volume_ratio), 2),
+            'bb_width_pct': None if bb_width_pct is None else round(float(bb_width_pct), 2),
+        }
+    except Exception:
+        return {
+            'label': 'Unknown Regime',
+            'tone': 'neutral',
+            'daily_vol_pct': None,
+            'atr_pct': None,
+            'momentum_20d_pct': None,
+            'adx': None,
+            'trend_strength': 0.0,
+            'volume_ratio': None,
+            'bb_width_pct': None,
+        }
+
+
+def _build_risk_profile(hist, indicators, current_price, market_regime):
+    """Risk score based on ATR, realized volatility, and recent drawdown."""
+    try:
+        close = hist['Close'].dropna()
+        returns = close.pct_change().dropna()
+        atr = float(indicators.get('atr') or 0.0)
+        atr_pct = (atr / current_price) * 100.0 if current_price and atr > 0 else 0.0
+        std_20d_pct = float(returns.tail(20).std() * 100.0) if len(returns) >= 5 else 0.0
+        window = close.tail(90)
+        running_max = window.cummax()
+        drawdowns = (window / running_max - 1.0) * 100.0 if len(window) else []
+        max_drawdown_pct = abs(float(drawdowns.min())) if len(drawdowns) else 0.0
+
+        atr_component = _clamp_number(atr_pct / 7.0, 0.0, 1.0)
+        std_component = _clamp_number(std_20d_pct / 5.0, 0.0, 1.0)
+        drawdown_component = _clamp_number(max_drawdown_pct / 35.0, 0.0, 1.0)
+        score = (0.4 * atr_component + 0.3 * std_component + 0.3 * drawdown_component) * 100.0
+        if market_regime.get('tone') == 'warning':
+            score += 10.0
+        score = _clamp_number(score, 0.0, 100.0)
+
+        if score >= 72:
+            label = 'Speculative'
+        elif score >= 55:
+            label = 'High'
+        elif score >= 32:
+            label = 'Medium'
+        else:
+            label = 'Low'
+
+        return {
+            'label': label,
+            'score': round(float(score), 1),
+            'atr_pct': round(float(atr_pct), 2),
+            'std_20d_pct': round(float(std_20d_pct), 2),
+            'max_drawdown_pct': round(float(max_drawdown_pct), 2),
+        }
+    except Exception:
+        return {
+            'label': 'Medium',
+            'score': 45.0,
+            'atr_pct': None,
+            'std_20d_pct': None,
+            'max_drawdown_pct': None,
+        }
+
+
+def _build_backtest_metrics(history_rows):
+    """Convert evaluated prediction history into trading-quality metrics."""
+    evaluated = []
+    for item in history_rows or []:
+        if item.get('actual_price') is None or item.get('current_price') is None:
+            continue
+        try:
+            base_price = float(item.get('current_price') or 0.0)
+            actual_price = float(item.get('actual_price') or 0.0)
+            predicted_return = float(item.get('predicted_return') or 0.0)
+        except (TypeError, ValueError):
+            continue
+        if base_price <= 0:
+            continue
+        actual_return = (actual_price / base_price) - 1.0
+        signed_return = actual_return if predicted_return >= 0 else -actual_return
+        evaluated.append({
+            'signed_return': signed_return,
+            'correct': bool(item.get('correct')),
+        })
+
+    if len(evaluated) < 5:
+        return {
+            'status': 'warming_up',
+            'evaluated_trades': len(evaluated),
+            'win_rate': None,
+            'sharpe': None,
+            'max_drawdown_pct': None,
+            'cagr_pct': None,
+            'profit_factor': None,
+        }
+
+    returns = [item['signed_return'] for item in evaluated]
+    wins = [ret for ret in returns if ret > 0]
+    losses = [ret for ret in returns if ret < 0]
+    mean_return = sum(returns) / len(returns)
+    variance = sum((ret - mean_return) ** 2 for ret in returns) / max(1, len(returns) - 1)
+    std_return = variance ** 0.5
+    sharpe = (mean_return / std_return) * (252 ** 0.5) if std_return > 0 else None
+    equity = 1.0
+    peak = 1.0
+    max_drawdown = 0.0
+    for ret in returns:
+        equity *= (1.0 + ret)
+        peak = max(peak, equity)
+        max_drawdown = min(max_drawdown, (equity / peak) - 1.0)
+    profit_factor = (sum(wins) / abs(sum(losses))) if losses and sum(wins) > 0 else None
+    cagr = (equity ** (252 / len(returns)) - 1.0) if equity > 0 else None
+
+    return {
+        'status': 'ready',
+        'evaluated_trades': len(evaluated),
+        'win_rate': round((len(wins) / len(returns)) * 100.0, 1),
+        'sharpe': None if sharpe is None else round(float(sharpe), 2),
+        'max_drawdown_pct': round(abs(float(max_drawdown)) * 100.0, 2),
+        'cagr_pct': None if cagr is None else round(float(cagr) * 100.0, 1),
+        'profit_factor': None if profit_factor is None else round(float(profit_factor), 2),
+    }
+
+
+def _build_ai_explanation(recommendation, market_regime, risk_profile, model_trust, sentiment_data):
+    """Short trader-facing explanation for the current signal."""
+    recommendation = recommendation or {}
+    signal = str(recommendation.get('signal') or 'HOLD').upper()
+    expected_move = recommendation.get('expected_move_pct')
+    confidence = recommendation.get('confidence_percent')
+    sentiment_score = (sentiment_data or {}).get('score')
+    reasons = []
+    if signal == 'HOLD':
+        if expected_move is not None:
+            reasons.append(
+                f"HOLD because the forecast edge is {float(expected_move):+.2f}% and current risk/validation checks do not justify a directional trade."
+            )
+        else:
+            reasons.append("HOLD because the decision engine does not see enough validated edge for a BUY or SELL.")
+        if market_regime.get('label'):
+            reasons.append(f"Regime is {market_regime.get('label')} with {market_regime.get('momentum_20d_pct', 'n/a')}% 20-day momentum.")
+        if risk_profile.get('label'):
+            reasons.append(f"Risk is {risk_profile.get('label')} from ATR, realized volatility, and max drawdown.")
+        if sentiment_score is not None:
+            tone = 'bullish' if float(sentiment_score) > 0.2 else 'bearish' if float(sentiment_score) < -0.2 else 'neutral'
+            reasons.append(f"News sentiment is {tone} at {float(sentiment_score):.2f}, so it is treated as context instead of a trade signal.")
+        return reasons[:5]
+    if expected_move is not None:
+        risk_multiplier = 1.0 - _clamp_number((risk_profile or {}).get('score', 45.0) / 100.0, 0.0, 0.85)
+        adjusted_move = float(expected_move) * risk_multiplier
+        direction = 'positive' if adjusted_move >= 0 else 'negative'
+        reasons.append(f"{signal} because the model sees a {direction} {abs(adjusted_move):.2f}% risk-adjusted forecast edge.")
+    else:
+        reasons.append(f"{signal} because the decision engine is balancing forecast edge against current risk.")
+    if market_regime.get('label'):
+        reasons.append(f"Regime is {market_regime.get('label')} with {market_regime.get('momentum_20d_pct', 'n/a')}% 20-day momentum.")
+    if confidence is not None:
+        reasons.append(f"Forecast confidence is {float(confidence):.0f}% after calibration and MLOps checks.")
+    if risk_profile.get('label'):
+        reasons.append(f"Risk is {risk_profile.get('label')} from ATR, realized volatility, and max drawdown.")
+    if sentiment_score is not None:
+        tone = 'supportive' if float(sentiment_score) >= 0 else 'negative'
+        reasons.append(f"News sentiment is {tone} at {float(sentiment_score):.2f}.")
+    if model_trust.get('score', 0) < 55:
+        reasons.append("Treat this as a smaller-size setup until more evaluated predictions improve trust.")
+    return reasons[:5]
+
+
+def _build_user_trust_payload(recommendation, v2_payload, model_health, market_regime, risk_profile):
+    """Convert ML/MLOps signals into a trader-friendly trust score."""
+    recommendation = recommendation or {}
+    v2_payload = v2_payload or {}
+    model_health = model_health or {}
+    components = recommendation.get('components') or {}
+
+    confidence = _clamp_number(recommendation.get('confidence', v2_payload.get('confidence', 0.0)))
+    model_quality = _clamp_number(components.get('model_quality', 0.55), 0.0, 1.0)
+    drift_score = _clamp_number(v2_payload.get('drift_score', 0.0), 0.0, 1.0)
+    health_accuracy = model_health.get('recent_accuracy')
+    if health_accuracy is None:
+        health_component = 0.55
+    else:
+        health_component = _clamp_number(health_accuracy, 0.0, 1.0)
+
+    risk_score = _clamp_number((risk_profile or {}).get('score', 45.0) / 100.0, 0.0, 1.0)
+    regime_penalty = 0.10 if market_regime.get('tone') == 'warning' else 0.0
+    risk_penalty = risk_score * 0.18
+    trust = (
+        0.34 * confidence
+        + 0.28 * model_quality
+        + 0.22 * health_component
+        + 0.16 * (1.0 - drift_score)
+        - regime_penalty
+        - risk_penalty
+    )
+    trust_score = int(round(_clamp_number(trust, 0.0, 1.0) * 100))
+
+    if trust_score >= 75:
+        label = 'High Trust'
+    elif trust_score >= 55:
+        label = 'Moderate Trust'
+    elif trust_score >= 35:
+        label = 'Low Trust'
+    else:
+        label = 'Training Trust'
+
+    reasons = []
+    if health_accuracy is None:
+        reasons.append('Not enough evaluated predictions yet')
+    if drift_score >= 0.35:
+        reasons.append('Feature drift is elevated')
+    if market_regime.get('tone') == 'warning':
+        reasons.append('High volatility regime')
+    if (risk_profile or {}).get('label') in ('High', 'Speculative'):
+        reasons.append(f"{risk_profile.get('label')} risk from volatility and drawdown")
+    if confidence < 0.45:
+        reasons.append('Model confidence is limited')
+    if not reasons:
+        reasons.append('Confidence, validation, drift, and recent accuracy are acceptable')
+
+    return {
+        'score': trust_score,
+        'label': label,
+        'confidence_component': round(confidence, 4),
+        'model_quality_component': round(model_quality, 4),
+        'recent_accuracy_component': None if health_accuracy is None else round(float(health_accuracy), 4),
+        'drift_score': round(drift_score, 4),
+        'risk_component': round(float(risk_score), 4),
+        'reasons': reasons[:3],
+    }
 
 
 def _normalize_prediction_days(raw_days) -> int:
@@ -146,6 +525,109 @@ def _get_ticker_training_job(ticker: str) -> dict:
         return dict(_ticker_training_jobs.get(ticker_key, {}))
 
 
+def _start_ticker_model_training(ticker: str, *, force: bool = False) -> tuple[bool, dict]:
+    """Start a fresh ticker-specific training job and expose progress through model-status."""
+    ticker_key = (ticker or '').strip().upper()
+    if not ticker_key:
+        return False, {'error': 'Ticker is required'}
+    if not _is_trainable_market_ticker(ticker_key):
+        _update_ticker_training_job(
+            ticker_key,
+            state='untrainable',
+            stage='unsupported_symbol',
+            progress=0,
+            message=_unsupported_training_message(ticker_key)
+        )
+        return False, _build_model_status(ticker_key)
+
+    with _ultimate_training_state_lock:
+        if ticker_key in _ultimate_training_in_progress and not force:
+            return False, _build_model_status(ticker_key)
+        if ticker_key in _ultimate_training_in_progress and force:
+            return False, _build_model_status(ticker_key)
+        _ultimate_training_in_progress.add(ticker_key)
+
+    _ultimate_prediction_cache.pop(ticker_key, None)
+    try:
+        from unified_engine.inference import clear_cache as clear_unified_cache
+        clear_unified_cache(ticker_key)
+    except Exception:
+        pass
+    _update_ticker_training_job(
+        ticker_key,
+        state='queued',
+        stage='queued',
+        progress=8,
+        message='Training request accepted. Preparing a fresh stock-specific model.'
+    )
+
+    def background_train():
+        try:
+            print(f"Background retry training started for {ticker_key}", flush=True)
+            _update_ticker_training_job(
+                ticker_key,
+                state='training',
+                stage='market_data_validation',
+                progress=18,
+                message='Fetching and validating market history for this ticker.'
+            )
+
+            from unified_engine.training import train_unified_model
+            _update_ticker_training_job(
+                ticker_key,
+                state='training',
+                stage='unified_model_training',
+                progress=38,
+                message='Training the unified ensemble and forecast range model.'
+            )
+            train_result = train_unified_model(ticker_key)
+            if train_result and train_result.success:
+                _publish_training_metrics(ticker_key, train_result.metrics)
+                _update_ticker_training_job(
+                    ticker_key,
+                    state='training',
+                    stage='validation_observability',
+                    progress=82,
+                    message='Validating predictions and publishing monitoring artifacts.'
+                )
+                _run_v2_observability_training(ticker_key)
+                _update_ticker_training_job(
+                    ticker_key,
+                    state='ready',
+                    stage='custom_model_ready',
+                    progress=100,
+                    message='Model is ready. Forecasts now use trained ticker-specific ML artifacts and live market features.'
+                )
+                print(f"Background retry training completed for {ticker_key}", flush=True)
+            else:
+                reason = train_result.reason if train_result else 'unknown training failure'
+                failure_state, failure_stage, failure_message = _training_failure_status(reason)
+                _update_ticker_training_job(
+                    ticker_key,
+                    state=failure_state,
+                    stage=failure_stage,
+                    progress=0,
+                    message=failure_message
+                )
+                print(f"Background retry training failed for {ticker_key}: {reason}", flush=True)
+        except Exception as train_err:
+            failure_state, failure_stage, failure_message = _training_failure_status(train_err)
+            _update_ticker_training_job(
+                ticker_key,
+                state=failure_state,
+                stage=failure_stage,
+                progress=0,
+                message=failure_message
+            )
+            print(f"Background retry training failed for {ticker_key}: {train_err}", flush=True)
+        finally:
+            with _ultimate_training_state_lock:
+                _ultimate_training_in_progress.discard(ticker_key)
+
+    threading.Thread(target=background_train, daemon=True).start()
+    return True, _build_model_status(ticker_key)
+
+
 def _ticker_has_trained_model(ticker: str) -> bool:
     ticker_key = (ticker or '').strip().upper()
     if not ticker_key:
@@ -183,26 +665,38 @@ def _build_model_status(ticker: str, *, prediction_ready: bool | None = None) ->
     job = _get_ticker_training_job(ticker_key)
     in_memory_training = ticker_key in _training_in_progress or ticker_key in _ultimate_training_in_progress
 
+    started_at = job.get('started_at') if job else None
+    elapsed_seconds = 0
+    if started_at:
+        try:
+            elapsed_seconds = max(0, int((datetime.utcnow() - datetime.fromisoformat(started_at.replace('Z', ''))).total_seconds()))
+        except Exception:
+            elapsed_seconds = 0
+
     if trained_model_ready or prediction_ready:
         state = 'ready'
         stage = 'custom_model_ready'
         progress = 100
-        message = 'Custom ticker model is ready. Forecasts use trained ML artifacts.'
+        message = 'Model is ready. Forecasts now use trained ticker-specific ML artifacts and live market features.'
     elif job:
         state = job.get('state', 'training')
         stage = job.get('stage', 'training')
         progress = int(job.get('progress', 25))
-        message = job.get('message') or 'Custom model training is running in the background.'
+        message = job.get('message') or 'Please wait a little while. We are training this ticker model and will refresh the forecast automatically when it is ready.'
     elif in_memory_training:
         state = 'training'
         stage = 'background_training'
         progress = 35
-        message = 'Custom model training is running in the background.'
+        message = 'Please wait a little while. The dedicated stock model is training in the background and this screen will update automatically.'
     else:
         state = 'preliminary'
         stage = 'not_trained'
         progress = 0
-        message = 'No custom model is available yet. Showing real-time preliminary market analysis.'
+        message = 'No trained model exists for this stock yet. Showing live market analysis now while the custom model is prepared.'
+
+    terminal_without_training = state in ('failed', 'untrainable', 'unsupported')
+    eta_seconds = 0 if (trained_model_ready or prediction_ready or terminal_without_training) else max(45, min(360, int(240 * (1 - progress / 100.0)) - elapsed_seconds))
+    eta_label = 'Ready now' if eta_seconds == 0 else f"about {max(1, round(eta_seconds / 60))} min"
 
     return {
         'ticker': ticker_key,
@@ -213,7 +707,10 @@ def _build_model_status(ticker: str, *, prediction_ready: bool | None = None) ->
         'is_training': state in ('queued', 'training'),
         'analysis_mode': 'custom_model' if (trained_model_ready or prediction_ready) else 'preliminary',
         'message': message,
-        'estimated_seconds_remaining': 0 if (trained_model_ready or prediction_ready) else 180,
+        'estimated_seconds_remaining': eta_seconds,
+        'estimated_completion_label': eta_label,
+        'started_at': started_at,
+        'elapsed_seconds': elapsed_seconds,
         'updated_at': job.get('updated_at') if job else datetime.utcnow().isoformat() + 'Z'
     }
 
@@ -485,6 +982,15 @@ def load_lstm_model(ticker):
     loaded_model = None
 
     def trigger_background_training():
+        if not _is_trainable_market_ticker(ticker):
+            _update_ticker_training_job(
+                ticker,
+                state='untrainable',
+                stage='unsupported_symbol',
+                progress=0,
+                message=_unsupported_training_message(ticker)
+            )
+            return
         with _training_state_lock:
             should_start_training = ticker not in _training_in_progress
             if should_start_training:
@@ -568,7 +1074,7 @@ def load_lstm_model(ticker):
                     state='ready',
                     stage='custom_model_ready',
                     progress=100,
-                    message='Custom model is ready. New users will receive fast trained-model predictions.'
+                    message='Model is ready. Forecasts now use trained ticker-specific ML artifacts and live market features.'
                 )
                 if result.trained:
                     print(f"✅ Background v2 training completed for {ticker}")
@@ -576,6 +1082,14 @@ def load_lstm_model(ticker):
                     print(f"⚠️ Background v2 training skipped for {ticker}: {result.reason}")
             except Exception as e:
                 print(f"❌ Background training failed for {ticker}: {e}")
+                failure_state, failure_stage, failure_message = _training_failure_status(e)
+                _update_ticker_training_job(
+                    ticker,
+                    state=failure_state,
+                    stage=failure_stage,
+                    progress=0,
+                    message=failure_message
+                )
             finally:
                 with _training_state_lock:
                     _training_in_progress.discard(ticker)
@@ -719,6 +1233,27 @@ def ticker_model_status(ticker):
             'ticker': ticker.upper(),
             'error': str(exc)
         }), 500
+
+
+@app.route('/api/model-status/<ticker>/retry', methods=['POST'])
+def retry_ticker_model_training(ticker):
+    """Clear a failed ticker job and start a fresh stock-specific training run."""
+    try:
+        started, status = _start_ticker_model_training(ticker, force=True)
+        return jsonify({
+            'success': True,
+            'started': started,
+            'ticker': status.get('ticker', ticker.upper()),
+            'model_status': status,
+            'message': 'Fresh ticker training started.' if started else 'Ticker training is already running.'
+        })
+    except Exception as exc:
+        return jsonify({
+            'success': False,
+            'ticker': ticker.upper(),
+            'error': str(exc)
+        }), 500
+
 
 # Cache management endpoints
 @app.route('/api/cache/stats')
@@ -1108,6 +1643,8 @@ def get_stock_data(ticker):
         )
         # Persist user-demanded symbol so future scheduled runs include it.
         try:
+            if not _is_trainable_market_ticker(resolved_ticker):
+                raise ValueError(f"{resolved_ticker} is not a trainable public market ticker")
             from mlops.config import MLOpsConfig
             MLOpsConfig.add_stock(resolved_ticker)
             # Also sync to ActiveTicker DB for admin dashboard visibility
@@ -1155,6 +1692,12 @@ def get_stock_data(ticker):
             close=hist['Close'],
             window=14
         ).average_true_range()
+        hist['ADX'] = ta.trend.ADXIndicator(
+            high=hist['High'],
+            low=hist['Low'],
+            close=hist['Close'],
+            window=14
+        ).adx()
         bb_indicator = ta.volatility.BollingerBands(hist['Close'], window=20, window_dev=2)
         hist['BB_upper'] = bb_indicator.bollinger_hband()
         hist['BB_middle'] = bb_indicator.bollinger_mavg()
@@ -1192,6 +1735,7 @@ def get_stock_data(ticker):
             'sma20': safe_float(latest_row.get('SMA_20')),
             'sma50': safe_float(latest_row.get('SMA_50')),
             'atr': safe_float(latest_row.get('ATR')),
+            'adx': safe_float(latest_row.get('ADX')),
             'bb_upper': safe_float(latest_row.get('BB_upper')),
             'bb_middle': safe_float(latest_row.get('BB_middle')),
             'bb_lower': safe_float(latest_row.get('BB_lower')),
@@ -1253,6 +1797,24 @@ def get_stock_data(ticker):
         market_cap = company_profile.get('market_cap')
         if not isinstance(market_cap, (int, float)) or pd.isna(market_cap) or market_cap <= 0:
             market_cap = None
+        currency = (company_profile.get('currency') or '').upper() if isinstance(company_profile, dict) else ''
+        if not currency:
+            country_key = (resolved_country or company_profile.get('country') or '').upper() if isinstance(company_profile, dict) else (resolved_country or '').upper()
+            exchange_key = (resolved_exchange or company_profile.get('exchange') or '').upper() if isinstance(company_profile, dict) else (resolved_exchange or '').upper()
+            if resolved_ticker.endswith(('.NS', '.BO')) or 'INDIA' in country_key or 'NSE' in exchange_key or 'BSE' in exchange_key:
+                currency = 'INR'
+            elif resolved_ticker.endswith('.L') or 'LONDON' in exchange_key or 'UNITED KINGDOM' in country_key:
+                currency = 'GBP'
+            elif resolved_ticker.endswith('.TO') or 'TORONTO' in exchange_key or 'CANADA' in country_key:
+                currency = 'CAD'
+            elif resolved_ticker.endswith('.AX') or 'AUSTRALIA' in country_key:
+                currency = 'AUD'
+            elif resolved_ticker.endswith('.T') or 'TOKYO' in exchange_key or 'JAPAN' in country_key:
+                currency = 'JPY'
+            elif resolved_ticker.endswith('.HK') or 'HONG KONG' in country_key:
+                currency = 'HKD'
+            else:
+                currency = 'USD'
         pe_ratio = company_metrics.get('pe_ratio') if isinstance(company_metrics, dict) else None
         volume = int(hist['Volume'].iloc[-1]) if 'Volume' in hist.columns else 0
 
@@ -1767,6 +2329,108 @@ def get_stock_data(ticker):
                 else 'Decision engine unavailable; defaulted to conservative display.'
             ]
         }
+        if 'expected_move_pct' not in recommendation_payload:
+            recommendation_payload['expected_move_pct'] = safe_float(profit_loss_percent, 3)
+
+        market_regime = _build_market_regime(hist, indicators, current_price)
+        risk_profile = _build_risk_profile(hist, indicators, current_price, market_regime)
+        model_health = {}
+        backtest_ghost = []
+        backtest_metrics = _build_backtest_metrics([])
+        try:
+            from unified_engine.monitoring import evaluate_predictions, get_model_health, get_prediction_history, log_prediction
+
+            current_prices = {
+                date.strftime('%Y-%m-%d'): float(price)
+                for date, price in hist['Close'].tail(30).items()
+                if not pd.isna(price)
+            }
+            evaluate_predictions(resolved_ticker, current_prices)
+            model_health = get_model_health(resolved_ticker)
+
+            history_rows = get_prediction_history(resolved_ticker, limit=60)
+            backtest_metrics = _build_backtest_metrics(history_rows)
+            for item in history_rows:
+                if item.get('actual_price') is None or item.get('predicted_return') is None:
+                    continue
+                base_price = float(item.get('current_price') or 0)
+                if base_price <= 0:
+                    continue
+                timestamp = item.get('evaluated_at') or item.get('timestamp')
+                date_label = str(timestamp).split('T')[0] if timestamp else None
+                if not date_label:
+                    continue
+                backtest_ghost.append({
+                    'date': date_label,
+                    'predicted': safe_float(base_price * (1.0 + float(item.get('predicted_return') or 0.0))),
+                    'actual': safe_float(item.get('actual_price')),
+                    'correct': bool(item.get('correct')),
+                })
+
+            if trained_prediction_ready and isinstance(v2_payload, dict):
+                log_prediction(
+                    resolved_ticker,
+                    float(v2_payload.get('direction_prob', 0.5)),
+                    recommendation_payload.get('signal', ai_signal),
+                    float(v2_payload.get('prediction', 0.0)),
+                    float(current_price),
+                    str(v2_payload.get('model_version', 'unknown')),
+                )
+        except Exception as monitoring_err:
+            print(f"Prediction reliability monitoring failed: {monitoring_err}")
+            model_health = {
+                'status': 'unavailable',
+                'recent_accuracy': None,
+                'needs_retraining': False,
+                'reason': 'Prediction monitoring unavailable',
+            }
+
+        raw_direction_prob = float(v2_payload.get('direction_prob', 0.5)) if isinstance(v2_payload, dict) else 0.5
+        empirical_accuracy = model_health.get('recent_accuracy')
+        empirical_anchor = 0.55 if empirical_accuracy is None else _clamp_number(empirical_accuracy, 0.0, 1.0)
+        empirical_direction = empirical_anchor if raw_direction_prob >= 0.5 else 1.0 - empirical_anchor
+        calibrated_direction_prob = (0.65 * raw_direction_prob) + (0.35 * empirical_direction)
+        calibrated_confidence = abs(calibrated_direction_prob - 0.5) * 2.0
+        probability_calibration = {
+            'method': 'empirical_accuracy_shrinkage',
+            'raw_direction_prob': round(float(raw_direction_prob), 4),
+            'calibrated_direction_prob': round(float(calibrated_direction_prob), 4),
+            'calibrated_confidence': round(float(calibrated_confidence), 4),
+            'sample_size': model_health.get('evaluated_predictions') or model_health.get('total_predictions'),
+            'status': 'ready' if empirical_accuracy is not None else 'warming_up',
+        }
+
+        v2_trust_payload = dict(v2_payload) if isinstance(v2_payload, dict) else {}
+        v2_trust_payload['confidence'] = min(
+            float(v2_trust_payload.get('confidence', 0.0) or 0.0),
+            max(0.18, calibrated_confidence),
+        )
+        model_trust = _build_user_trust_payload(
+            recommendation_payload,
+            v2_trust_payload,
+            model_health,
+            market_regime,
+            risk_profile,
+        )
+        ai_explanation = _build_ai_explanation(
+            recommendation_payload,
+            market_regime,
+            risk_profile,
+            model_trust,
+            sentiment_data,
+        )
+        prediction_horizon = {
+            'days': days,
+            'label': f"{days} Trading Day" if days == 1 else f"{days} Trading Days",
+            'style': 'intraday' if days == 1 else 'swing' if days <= 10 else 'position',
+        }
+        trained_at = (v2_payload.get('trained_at') if isinstance(v2_payload, dict) else None) or model_info_data.get('last_trained')
+        model_freshness = {
+            'trained_at': trained_at or 'unknown',
+            'data_freshness': v2_payload.get('data_freshness') if isinstance(v2_payload, dict) else None,
+            'drift_score': safe_float(v2_payload.get('drift_score') if isinstance(v2_payload, dict) else 0.0, 4),
+            'status': 'fresh' if trained_prediction_ready and not model_health.get('needs_retraining') else 'retrain_watch',
+        }
 
         response = {
             'success': True,
@@ -1776,6 +2440,7 @@ def get_stock_data(ticker):
             'resolved_country': resolved_country,
             'used_fallback_source': fallback_used,
             'company_name': company_name,
+            'currency': currency,
             'current_price': safe_float(current_price),
             'predicted_price': safe_float(tomorrow_prediction),
             'profit_loss': safe_float(profit_loss),
@@ -1783,6 +2448,16 @@ def get_stock_data(ticker):
             'is_profit': bool(profit_loss > 0),
             'ai_signal': ai_signal,
             'recommendation': recommendation_payload,
+            'market_regime': market_regime,
+            'risk_profile': risk_profile,
+            'model_trust': model_trust,
+            'reliability': model_health,
+            'backtest_metrics': backtest_metrics,
+            'ai_explanation': ai_explanation,
+            'prediction_horizon': prediction_horizon,
+            'model_freshness': model_freshness,
+            'probability_calibration': probability_calibration,
+            'backtest_ghost': backtest_ghost[-30:],
             'day_change': safe_float(day_change),
             'day_change_percent': safe_float(day_change_percent),
             'day_high': safe_float(day_high),
@@ -1999,6 +2674,15 @@ def predict_multi_day_lstm(hist, current_price, days, ticker):
 
     def trigger_background_training():
         ticker_key = ticker.upper()
+        if not _is_trainable_market_ticker(ticker_key):
+            _update_ticker_training_job(
+                ticker_key,
+                state='untrainable',
+                stage='unsupported_symbol',
+                progress=0,
+                message=_unsupported_training_message(ticker_key)
+            )
+            return
         with _ultimate_training_state_lock:
             should_start = ticker_key not in _ultimate_training_in_progress
             if should_start:
@@ -2033,15 +2717,17 @@ def predict_multi_day_lstm(hist, current_price, days, ticker):
                 else:
                     reason = train_result.reason if train_result else "unknown"
                     print(f"Background v5.0 training failed for {ticker_key}: {reason}", flush=True)
+                    failure_state, failure_stage, failure_message = _training_failure_status(reason)
                     _update_ticker_training_job(
-                        ticker_key, state='failed', stage='training_failed',
-                        progress=0, message=f'Training failed: {reason}'
+                        ticker_key, state=failure_state, stage=failure_stage,
+                        progress=0, message=failure_message
                     )
             except Exception as train_err:
                 print(f"Background v5.0 training failed for {ticker_key}: {train_err}", flush=True)
+                failure_state, failure_stage, failure_message = _training_failure_status(train_err)
                 _update_ticker_training_job(
-                    ticker_key, state='failed', stage='training_failed',
-                    progress=0, message=f'Training failed: {train_err}'
+                    ticker_key, state=failure_state, stage=failure_stage,
+                    progress=0, message=failure_message
                 )
             finally:
                 with _ultimate_training_state_lock:

@@ -10,7 +10,8 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useTheme } from '../contexts/ThemeContext';
 
-const API = window.location.origin + '/chatbot';
+const BACKEND_API = process.env.REACT_APP_API_URL || window.location.origin;
+const API = `${BACKEND_API}/chatbot`;
 
 const EMOJIS = {
     '📈 Trading': ['📈', '📉', '📊', '💰', '💵', '🏦', '💎', '🚀', '🔥', '⚡', '🎯', '✅', '❌'],
@@ -33,13 +34,26 @@ const QUICK = [
 /* ── Icon button helper (outside component to avoid re-creation) ── */
 const iconBtnStyle = { width: 34, height: 34, borderRadius: 8, border: 'none', background: 'transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' };
 
+const DATAVISION_WELCOME = {
+    role: 'assistant',
+    content: "Hey! I'm your **Datavision ML Assistant**.\n\n- Ask for a stock prediction, like **predict AAPL**.\n- Compare watchlist stocks with Opportunity Radar.\n- Understand trust score, risk, market regime, and forecast range.\n- Get help reading the charts and model output.\n\nWhat would you like to analyze?"
+};
+
+const DATAVISION_QUICK = [
+    { label: 'Predict AAPL', q: 'Predict AAPL' },
+    { label: 'Analyze NVDA', q: 'Analyze NVDA stock' },
+    { label: 'Trust score', q: 'Explain trust score in this website' },
+    { label: 'Opportunity Radar', q: 'How does Opportunity Radar work?' },
+    { label: 'ML models', q: 'What stocks have trained AI models?' },
+];
+
 const ChatBot = () => {
     const { isDark } = useTheme();
     const [isOpen, setIsOpen] = useState(false);
     const [isFullPage, setIsFullPage] = useState(false);
     const [showSidebar, setShowSidebar] = useState(false);
     const [chatId, setChatId] = useState(null);
-    const [messages, setMessages] = useState([WELCOME]);
+    const [messages, setMessages] = useState([DATAVISION_WELCOME]);
     const [savedChats, setSavedChats] = useState([]);
     const [input, setInput] = useState('');
     const [isLoading, setIsLoading] = useState(false);
@@ -47,6 +61,7 @@ const ChatBot = () => {
     const [isRecording, setIsRecording] = useState(false);
     const [imagePreview, setImagePreview] = useState(null);
     const [feedbackGiven, setFeedbackGiven] = useState({});
+    const [pendingPredictionRequest, setPendingPredictionRequest] = useState(false);
     const endRef = useRef(null);
     const inputRef = useRef(null);
     const fileRef = useRef(null);
@@ -109,15 +124,55 @@ const ChatBot = () => {
     };
     const rmImage = () => { setImagePreview(null); if (fileRef.current) fileRef.current.value = ''; };
     const addEmoji = (em) => { setInput(p => p + em); inputRef.current?.focus(); };
-    const newChat = () => { setChatId(null); setMessages([WELCOME]); setShowSidebar(false); setFeedbackGiven({}); };
+    const newChat = () => { setChatId(null); setMessages([DATAVISION_WELCOME]); setShowSidebar(false); setFeedbackGiven({}); };
     const loadChat = async (id) => {
-        try { const r = await axios.get(`${API}/chats/${id}`); setChatId(id); const m = r.data.messages || []; setMessages(m.length ? m : [WELCOME]); setShowSidebar(false); setFeedbackGiven({}); }
+        try { const r = await axios.get(`${API}/chats/${id}`); setChatId(id); const m = r.data.messages || []; setMessages(m.length ? m : [DATAVISION_WELCOME]); setShowSidebar(false); setFeedbackGiven({}); }
         catch { /* ignore */ }
     };
     const delChat = async (id, e) => {
         e.stopPropagation();
         try { await axios.delete(`${API}/chats/${id}`); setSavedChats(p => p.filter(x => x.chat_id !== id)); if (chatId === id) newChat(); }
         catch { /* ignore */ }
+    };
+
+    const extractPredictionSymbol = (textValue) => {
+        const text = String(textValue || '').trim();
+        const suffix = text.toUpperCase().match(/\b[A-Z0-9]{1,15}\.[A-Z]{1,3}\b/);
+        if (suffix) return suffix[0];
+        const dollar = text.toUpperCase().match(/\$([A-Z]{1,8})\b/);
+        if (dollar) return dollar[1];
+        const direct = text.toUpperCase().match(/\b[A-Z0-9]{2,10}(?:-[A-Z]{2,5})?\b/);
+        if (direct) return direct[0];
+        return null;
+    };
+
+    const wantsPrediction = (textValue) => /\b(predict|prediction|forecast|target|outlook)\b/i.test(String(textValue || ''));
+
+    const formatPredictionReply = (data) => {
+        const ticker = data?.ticker || data?.requested_ticker || 'the stock';
+        const currency = data?.currency || 'USD';
+        const symbol = currency === 'INR' ? 'Rs ' : currency === 'GBP' ? 'GBP ' : currency === 'JPY' ? 'JPY ' : currency === 'EUR' ? 'EUR ' : '$';
+        const current = Number(data?.current_price);
+        const predicted = Number(data?.predicted_price);
+        const ready = Boolean(data?.prediction_ready);
+        const status = data?.model_status || {};
+        const signal = data?.recommendation?.signal || data?.ai_signal || (ready ? 'HOLD' : 'LIVE ANALYSIS');
+        const trust = data?.model_trust?.score;
+        const rangeLow = Array.isArray(data?.price_range_low) ? Number(data.price_range_low[data.price_range_low.length - 1]) : null;
+        const rangeHigh = Array.isArray(data?.price_range_high) ? Number(data.price_range_high[data.price_range_high.length - 1]) : null;
+        const lines = [
+            `### ${ticker} prediction desk`,
+            ready
+                ? `Model status: **Ready**.`
+                : `Model status: **Training / live analysis**. ETA: **${status.estimated_completion_label || 'a few minutes'}**.`,
+            Number.isFinite(current) ? `Live price: **${symbol}${current.toFixed(2)}**` : null,
+            Number.isFinite(predicted) && ready ? `Model target: **${symbol}${predicted.toFixed(2)}**` : null,
+            Number.isFinite(rangeLow) && Number.isFinite(rangeHigh) && ready ? `Forecast range: **${symbol}${Math.min(rangeLow, rangeHigh).toFixed(2)} - ${symbol}${Math.max(rangeLow, rangeHigh).toFixed(2)}**` : null,
+            `Signal mode: **${String(signal).replace('TRAINING', 'LIVE ANALYSIS')}**`,
+            trust != null ? `Trust score: **${trust}/100**` : null,
+            !ready ? 'I am showing conservative live analysis now. The trained forecast will appear automatically when validation and calibration finish.' : null,
+        ].filter(Boolean);
+        return lines.join('\n');
     };
 
     /* ── Feedback ── */
@@ -140,6 +195,24 @@ const ChatBot = () => {
         const updated = [...messages, userMsg];
         setMessages(updated); setInput(''); rmImage(); setShowEmoji(false); setIsLoading(true);
         try {
+            const predictionSymbol = pendingPredictionRequest || wantsPrediction(txt) ? extractPredictionSymbol(txt) : null;
+            if (wantsPrediction(txt) && !predictionSymbol) {
+                setPendingPredictionRequest(true);
+                setMessages(p => [...p, {
+                    role: 'assistant',
+                    content: 'Which stock should I predict? Send a ticker like **AAPL**, **RELIANCE.NS**, **7203.T**, or **BTC-USD**.'
+                }]);
+                return;
+            }
+            if (pendingPredictionRequest && predictionSymbol) {
+                setPendingPredictionRequest(false);
+            }
+            if ((wantsPrediction(txt) || pendingPredictionRequest) && predictionSymbol) {
+                const r = await axios.get(`${BACKEND_API}/api/stock/${predictionSymbol}?days=7`, { timeout: 120000 });
+                setMessages(p => [...p, { role: 'assistant', content: formatPredictionReply(r.data) }]);
+                return;
+            }
+
             const r = await axios.post(`${API}/chat`, {
                 message: imagePreview ? `${txt} [User attached a chart/image for analysis]` : txt,
                 history: updated.filter(m => m.role).slice(-10).map(m => ({ role: m.role, content: m.content })),
@@ -150,10 +223,13 @@ const ChatBot = () => {
             loadChats();
         } catch (err) {
             let errorMsg = "Couldn't reach the analysis engine.";
-            if (err.code === 'ECONNABORTED') errorMsg = "🕒 Analysis is taking longer than expected. Please try again in 30 seconds.";
-            else if (err.response?.data?.detail) errorMsg = `⚠️ ${err.response.data.detail}`;
-            else if (err.response?.data?.error) errorMsg = `⚠️ ${err.response.data.error}`;
-            else if (!err.response) errorMsg = '⚠️ Backend offline. Ensure the chatbot server is running.';
+            if (err.code === 'ECONNABORTED') errorMsg = "Analysis is taking longer than expected. Please try again in 30 seconds.";
+            else if (String(err.response?.data?.detail || '').includes('8001')) {
+                errorMsg = "The full chat brain is still starting, but I can still help with this ML stock platform. Try asking: predict AAPL, explain trust score, or how does Opportunity Radar work?";
+            }
+            else if (err.response?.data?.detail) errorMsg = err.response.data.detail;
+            else if (err.response?.data?.error) errorMsg = err.response.data.error;
+            else if (!err.response) errorMsg = 'The analysis backend is offline. Please start the backend service and try again.';
 
             setMessages(p => [...p, { role: 'assistant', content: errorMsg }]);
         } finally { setIsLoading(false); }
@@ -217,7 +293,7 @@ const ChatBot = () => {
             <div style={{ maxWidth: maxW, margin: '0 auto' }}>
                 {messages.length <= 1 && (
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'center', marginTop: isFullPage ? 40 : 12, marginBottom: 20 }}>
-                        {QUICK.map((a, i) => (
+                        {DATAVISION_QUICK.map((a, i) => (
                             <button key={i} onClick={() => send(a.q)} disabled={isLoading}
                                 style={{ padding: '10px 16px', borderRadius: 12, fontSize: 13, border: chipBorder, background: chipBg, color: chipText, cursor: 'pointer', transition: 'all 0.15s', fontWeight: 500 }}>
                                 {a.label}
@@ -240,7 +316,7 @@ const ChatBot = () => {
                                     <span style={{ fontSize: 12, color: userAvatarText, fontWeight: 700 }}>Y</span>
                                 </div>
                             )}
-                            <span style={{ fontSize: 13, fontWeight: 600, color: text }}>{m.role === 'assistant' ? 'Trading Intelligence' : 'You'}</span>
+                            <span style={{ fontSize: 13, fontWeight: 600, color: text }}>{m.role === 'assistant' ? 'Datavision ML Assistant' : 'You'}</span>
                         </div>
                         <div style={{ paddingLeft: 38, fontSize: isFullPage ? 14.5 : 13, lineHeight: 1.75, color: text, whiteSpace: m.role === 'user' ? 'pre-line' : 'normal' }}>
                             {m.image && <img src={m.image} alt="" style={{ maxWidth: 300, maxHeight: 200, borderRadius: 10, marginBottom: 8, display: 'block' }} />}
@@ -264,7 +340,7 @@ const ChatBot = () => {
                     <div style={{ padding: isFullPage ? '18px 24px' : '12px 16px', borderRadius: 12 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
                             <img src={isDark ? '/assets/logo-dark.jpg' : '/assets/logo-light.jpg'} alt="DV" style={{ width: 28, height: 28, borderRadius: 8, objectFit: 'cover' }} />
-                            <span style={{ fontSize: 13, fontWeight: 600, color: text }}>Trading Intelligence</span>
+                            <span style={{ fontSize: 13, fontWeight: 600, color: text }}>Datavision ML Assistant</span>
                         </div>
                         <div style={{ paddingLeft: 38, display: 'flex', alignItems: 'center', gap: 6 }}>
                             {[0, 150, 300].map((d, j) => <div key={j} style={{ width: 8, height: 8, borderRadius: '50%', background: ['#60a5fa', '#818cf8', '#a78bfa'][j], animation: `bounce 1.4s ease-in-out ${d}ms infinite` }} />)}
@@ -334,7 +410,7 @@ const ChatBot = () => {
                         <Send style={{ width: 16, height: 16, color: '#fff' }} />
                     </button>
                 </div>
-                <p style={{ textAlign: 'center', fontSize: 10, color: textMuted, margin: '8px 0 0' }}>Powered by <strong>Datavision</strong> • AI Trading Intelligence • Not financial advice</p>
+                <p style={{ textAlign: 'center', fontSize: 10, color: textMuted, margin: '8px 0 0' }}>Powered by <strong>Datavision</strong> • ML Stock Assistant • Not financial advice</p>
             </div>
         </div>
     );
@@ -372,8 +448,8 @@ const ChatBot = () => {
                         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                             <img src={isDark ? '/assets/logo-dark.jpg' : '/assets/logo-light.jpg'} alt="Datavision" style={{ width: 32, height: 32, borderRadius: 10, objectFit: 'cover' }} />
                             <div>
-                                <h3 style={{ color: text, fontWeight: 700, fontSize: 15, margin: 0 }}>AI Trading Intelligence</h3>
-                                <span style={{ color: textMuted, fontSize: 11 }}>Hybrid RAG • LSTM Models • Live Data</span>
+                                <h3 style={{ color: text, fontWeight: 700, fontSize: 15, margin: 0 }}>Datavision ML Assistant</h3>
+                                <span style={{ color: textMuted, fontSize: 11 }}>Forecasts • Trust scores • Live market data</span>
                             </div>
                         </div>
                         <div style={{ display: 'flex', gap: 6 }}>
@@ -417,7 +493,7 @@ const ChatBot = () => {
                                     {showSidebar ? <ChevronLeft style={{ width: 16, height: 16, color: '#fff' }} /> : <Menu style={{ width: 16, height: 16, color: '#fff' }} />}
                                 </button>
                                 <img src='/assets/logo-dark.jpg' alt="DV" style={{ width: 28, height: 28, borderRadius: 8, objectFit: 'cover' }} />
-                                <h3 style={{ color: '#fff', fontWeight: 700, fontSize: 13, margin: 0 }}>Trading Intelligence</h3>
+                                <h3 style={{ color: '#fff', fontWeight: 700, fontSize: 13, margin: 0 }}>Datavision Assistant</h3>
                             </div>
                             <div style={{ display: 'flex', gap: 2 }}>
                                 <button onClick={newChat} title="New chat" style={iconBtnStyle}><Plus style={{ width: 14, height: 14, color: 'rgba(255,255,255,0.8)' }} /></button>
