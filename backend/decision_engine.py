@@ -224,11 +224,15 @@ def build_decision(
     metrics = (model_payload or {}).get("metrics") or {}
     has_validation_metrics = bool(metrics)
     auc = _safe_float(metrics.get("auc"), 0.5)
+    balanced_acc = _safe_float(metrics.get("balanced_accuracy"), _safe_float(metrics.get("accuracy"), 50.0))
+    macro_f1 = _safe_float(metrics.get("macro_f1"), _safe_float(metrics.get("f1"), 0.0))
     fold_acc = _safe_float(metrics.get("fold_mean_accuracy"), _safe_float(metrics.get("accuracy"), 50.0))
+    fold_std = _safe_float(metrics.get("fold_std_accuracy"), 0.0)
     pvalue = _safe_float(metrics.get("binom_pvalue"), 1.0)
     brier = _safe_float(metrics.get("brier_score"), 0.25)
     overfit_risk = str(metrics.get("overfit_risk", "unknown")).lower()
     underfit_risk = str(metrics.get("underfit_risk", "unknown")).lower()
+    quality_gate = str(metrics.get("model_quality_gate", "")).lower()
 
     model_quality = 1.0
     if has_validation_metrics:
@@ -236,6 +240,12 @@ def build_decision(
             model_quality *= 0.55
         elif auc < 0.54 and fold_acc < 55.0:
             model_quality *= 0.75
+        if balanced_acc < 53.0 or macro_f1 < 45.0:
+            model_quality *= 0.60
+        if fold_std > 18.0:
+            model_quality *= 0.80
+        if quality_gate in {"class_imbalance_warning", "not_statistically_significant", "weak_directional_edge"}:
+            model_quality *= 0.65
         if overfit_risk == "high":
             model_quality *= 0.65
         elif overfit_risk == "medium":

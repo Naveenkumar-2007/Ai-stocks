@@ -36,14 +36,14 @@ const iconBtnStyle = { width: 34, height: 34, borderRadius: 8, border: 'none', b
 
 const DATAVISION_WELCOME = {
     role: 'assistant',
-    content: "Hey! I'm your **Datavision ML Assistant**.\n\n- Ask for a stock prediction, like **predict AAPL**.\n- Compare watchlist stocks with Opportunity Radar.\n- Understand trust score, risk, market regime, and forecast range.\n- Get help reading the charts and model output.\n\nWhat would you like to analyze?"
+    content: "Hey! I'm your **Datavision Agentic RAG Assistant**.\n\n- Say **Agent, open AAPL prediction** and I will operate the Prediction page.\n- Compare watchlist stocks with Opportunity Radar.\n- Upload a chart image and include the ticker for grounded model context.\n- Understand trust score, risk, market regime, and forecast range.\n\nWhat would you like to analyze?"
 };
 
 const DATAVISION_QUICK = [
-    { label: 'Predict AAPL', q: 'Predict AAPL' },
-    { label: 'Analyze NVDA', q: 'Analyze NVDA stock' },
+    { label: 'Agent Predict AAPL', q: 'Agent, open AAPL prediction and explain it' },
+    { label: 'Compare 3 stocks', q: 'Analyze Apple, Google, and NVDA with 7 days forecast' },
     { label: 'Trust score', q: 'Explain trust score in this website' },
-    { label: 'Opportunity Radar', q: 'How does Opportunity Radar work?' },
+    { label: 'Rank watchlist', q: 'Rank watchlist AAPL MSFT NVDA TSLA GOOGL' },
     { label: 'ML models', q: 'What stocks have trained AI models?' },
 ];
 
@@ -135,18 +135,129 @@ const ChatBot = () => {
         catch { /* ignore */ }
     };
 
-    const extractPredictionSymbol = (textValue) => {
+    const COMPANY_SYMBOLS = {
+        NVIDIA: 'NVDA',
+        NVDA: 'NVDA',
+        APPLE: 'AAPL',
+        AAPL: 'AAPL',
+        MICROSOFT: 'MSFT',
+        MSFT: 'MSFT',
+        GOOGLE: 'GOOGL',
+        GOOGL: 'GOOGL',
+        ALPHABET: 'GOOGL',
+        AMAZON: 'AMZN',
+        AMZN: 'AMZN',
+        TESLA: 'TSLA',
+        TSLA: 'TSLA',
+        META: 'META',
+        RELIANCE: 'RELIANCE.NS',
+        TCS: 'TCS.NS',
+        INFOSYS: 'INFY.NS',
+        INFY: 'INFY.NS',
+        HDFCBANK: 'HDFCBANK.NS',
+        ICICIBANK: 'ICICIBANK.NS',
+    };
+    const SYMBOL_STOP_WORDS = new Set([
+        'HEY', 'HI', 'HELLO', 'PLEASE', 'CAN', 'YOU', 'ME', 'MY', 'THE', 'A', 'AN',
+        'PREDICT', 'PREDICTION', 'FORECAST', 'TARGET', 'OUTLOOK', 'ANALYZE', 'OPEN',
+        'AGENT', 'CLICK', 'RUN', 'BROWSER', 'BROWSE', 'GO', 'TO', 'DO', 'FOR', 'STOCK',
+        'STOCKS', 'SHARE', 'SHARES', 'OK', 'OKAY', 'HOW', 'GIVE', 'YOUR', 'YOURSELF',
+        'THIS', 'THAT', 'WHAT', 'WHEN', 'WHERE', 'WHY', 'WHICH', 'WANT', 'NEED', 'HELP',
+        'USE', 'USING', 'EACH', 'DAYS', 'DAY', 'AND', 'ALSO', 'WITH', 'COMPARE', 'COMPANY',
+        'COMPANYS', 'COMPANIES', 'THREE', 'TWO', 'ONE'
+    ]);
+
+    const extractPredictionSymbols = (textValue) => {
         const text = String(textValue || '').trim();
-        const suffix = text.toUpperCase().match(/\b[A-Z0-9]{1,15}\.[A-Z]{1,3}\b/);
-        if (suffix) return suffix[0];
-        const dollar = text.toUpperCase().match(/\$([A-Z]{1,8})\b/);
-        if (dollar) return dollar[1];
-        const direct = text.toUpperCase().match(/\b[A-Z0-9]{2,10}(?:-[A-Z]{2,5})?\b/);
-        if (direct) return direct[0];
-        return null;
+        const upper = text.toUpperCase();
+        const found = [];
+        const push = (symbol) => {
+            const clean = String(symbol || '').trim().toUpperCase();
+            if (clean && !found.includes(clean)) found.push(clean);
+        };
+
+        for (const [word, symbol] of Object.entries(COMPANY_SYMBOLS)) {
+            if (new RegExp(`\\b${word}\\b`, 'i').test(text)) push(symbol);
+        }
+
+        const suffixes = upper.match(/\b[A-Z0-9]{1,15}\.[A-Z]{1,3}\b/g) || [];
+        suffixes.filter((item) => !SYMBOL_STOP_WORDS.has(item)).forEach(push);
+
+        const dollars = upper.match(/\$([A-Z]{1,8})\b/g) || [];
+        dollars.map((item) => item.replace('$', '')).filter((item) => !SYMBOL_STOP_WORDS.has(item)).forEach(push);
+
+        const tokens = upper.match(/\b[A-Z0-9]{2,10}(?:-[A-Z]{2,5})?\b/g) || [];
+        tokens.filter((item) => !SYMBOL_STOP_WORDS.has(item)).forEach((item) => push(COMPANY_SYMBOLS[item] || item));
+
+        return found.slice(0, 8);
     };
 
-    const wantsPrediction = (textValue) => /\b(predict|prediction|forecast|target|outlook)\b/i.test(String(textValue || ''));
+    const extractPredictionSymbol = (textValue) => {
+        const symbols = extractPredictionSymbols(textValue);
+        return symbols.length ? symbols[symbols.length - 1] : null;
+    };
+
+    const extractForecastDays = (textValue) => {
+        const text = String(textValue || '');
+        const match = text.match(/\b(1|7|14|30)\s*(day|days|d)\b/i);
+        if (!match) return 7;
+        const numeric = Number(match[1]);
+        if (numeric <= 1) return 1;
+        if (numeric <= 7) return 7;
+        return 14;
+    };
+
+    const wantsPrediction = (textValue) => /\b(predict|prediction|forecast|target|outlook|analyze|analysis)\b/i.test(String(textValue || ''));
+    const wantsAgentAction = (textValue) => /\b(agent|open|click|go to|run|browser|browse|predict|forecast|analyze)\b/i.test(String(textValue || ''));
+    const wantsWatchlist = (textValue) => /\b(watchlist|opportunity radar|rank stocks|rank watchlist|compare stocks|compare|these stocks|3 stocks|three stocks|multiple stocks)\b/i.test(String(textValue || ''));
+    const wantsPredictionHelp = (textValue) => {
+        const text = String(textValue || '').toLowerCase();
+        return /\bhow\s+(to|do|can)\b/.test(text) && /\b(predict|prediction|forecast|use|give my stock)\b/.test(text);
+    };
+
+    const predictionHelpReply = [
+        'Yes. You can give me any listed stock symbol and I can help run the prediction.',
+        '',
+        'Use it like this:',
+        '- **predict NVDA**',
+        '- **Agent, open AAPL prediction**',
+        '- **forecast RELIANCE.NS for 7 days**',
+        '- **rank watchlist AAPL MSFT NVDA TSLA GOOGL**',
+        '',
+        'When you explicitly ask me to open/run/click/predict a ticker, I will operate the Prediction page. If you only ask how it works, I will explain instead of running a random stock.'
+    ].join('\n');
+
+    const runPredictionDesk = (symbol, nextDays = 7) => {
+        const cleanSymbol = String(symbol || '').trim().toUpperCase();
+        if (!cleanSymbol) return false;
+        const command = { type: 'predict', symbol: cleanSymbol, days: nextDays, source: 'chatbot_agent', ts: Date.now() };
+        const isPredictionPage = window.location.pathname.replace(/\/$/, '') === '/prediction';
+
+        if (isPredictionPage) {
+            window.dispatchEvent(new CustomEvent('datavision:agent-predict', { detail: command }));
+            return false;
+        }
+
+        sessionStorage.setItem('prediction_agent_command', JSON.stringify(command));
+        window.location.href = `/prediction?agentStock=${encodeURIComponent(cleanSymbol)}`;
+        return true;
+    };
+
+    const runWatchlistDesk = (symbols = [], nextDays = 7) => {
+        const cleaned = [...new Set((symbols || []).map((item) => String(item).trim().toUpperCase()).filter(Boolean))].slice(0, 8);
+        const command = { type: 'watchlist', symbols: cleaned, days: nextDays, source: 'chatbot_agent', ts: Date.now() };
+        const isPredictionPage = window.location.pathname.replace(/\/$/, '') === '/prediction';
+        if (isPredictionPage) {
+            window.dispatchEvent(new CustomEvent('datavision:agent-predict', { detail: command }));
+            return false;
+        }
+        sessionStorage.setItem('prediction_agent_command', JSON.stringify(command));
+        const query = cleaned.length
+            ? `?agentAction=watchlist&symbols=${encodeURIComponent(cleaned.join(','))}&days=${nextDays}`
+            : `?agentAction=watchlist&days=${nextDays}`;
+        window.location.href = `/prediction${query}`;
+        return true;
+    };
 
     const formatPredictionReply = (data) => {
         const ticker = data?.ticker || data?.requested_ticker || 'the stock';
@@ -165,6 +276,7 @@ const ChatBot = () => {
             ready
                 ? `Model status: **Ready**.`
                 : `Model status: **Training / live analysis**. ETA: **${status.estimated_completion_label || 'a few minutes'}**.`,
+            `Agent action: **Prediction page opened for ${ticker}**.`,
             Number.isFinite(current) ? `Live price: **${symbol}${current.toFixed(2)}**` : null,
             Number.isFinite(predicted) && ready ? `Model target: **${symbol}${predicted.toFixed(2)}**` : null,
             Number.isFinite(rangeLow) && Number.isFinite(rangeHigh) && ready ? `Forecast range: **${symbol}${Math.min(rangeLow, rangeHigh).toFixed(2)} - ${symbol}${Math.max(rangeLow, rangeHigh).toFixed(2)}**` : null,
@@ -189,13 +301,35 @@ const ChatBot = () => {
     const send = async (override) => {
         const txt = override || input;
         if (!txt.trim() && !imagePreview) return;
+        const attachedImage = imagePreview;
         let display = txt;
-        if (imagePreview) display = txt ? `📷 Image attached\n${txt}` : '📷 Image attached';
-        const userMsg = { role: 'user', content: display, image: imagePreview || null };
+        if (attachedImage) display = txt ? `Chart image attached\n${txt}` : 'Chart image attached';
+        const userMsg = { role: 'user', content: display, image: attachedImage || null };
         const updated = [...messages, userMsg];
         setMessages(updated); setInput(''); rmImage(); setShowEmoji(false); setIsLoading(true);
         try {
-            const predictionSymbol = pendingPredictionRequest || wantsPrediction(txt) ? extractPredictionSymbol(txt) : null;
+            if (wantsPredictionHelp(txt)) {
+                setMessages(p => [...p, { role: 'assistant', content: predictionHelpReply }]);
+                return;
+            }
+
+            const requestedSymbols = extractPredictionSymbols(txt);
+            const forecastDays = extractForecastDays(txt);
+            const shouldCompare = (wantsWatchlist(txt) || requestedSymbols.length > 1) && (wantsPrediction(txt) || wantsAgentAction(txt) || wantsWatchlist(txt));
+            const predictionSymbol = pendingPredictionRequest || wantsPrediction(txt) || wantsAgentAction(txt) ? extractPredictionSymbol(txt) : null;
+
+            if (shouldCompare) {
+                const symbols = requestedSymbols.length > 1 ? requestedSymbols : [];
+                const navigated = runWatchlistDesk(symbols, forecastDays);
+                const symbolText = symbols.length ? symbols.join(', ') : 'your watchlist';
+                setMessages(p => [...p, {
+                    role: 'assistant',
+                    content: navigated
+                        ? `Opening **AI Watchlist Ranking - Opportunity Radar** for **${symbolText}** now. I will run the ${forecastDays}-day comparison and show the ranking charts.`
+                        : `Opening **AI Watchlist Ranking - Opportunity Radar** for **${symbolText}** and running the ${forecastDays}-day comparison now.`
+                }]);
+                return;
+            }
             if (wantsPrediction(txt) && !predictionSymbol) {
                 setPendingPredictionRequest(true);
                 setMessages(p => [...p, {
@@ -207,19 +341,32 @@ const ChatBot = () => {
             if (pendingPredictionRequest && predictionSymbol) {
                 setPendingPredictionRequest(false);
             }
-            if ((wantsPrediction(txt) || pendingPredictionRequest) && predictionSymbol) {
-                const r = await axios.get(`${BACKEND_API}/api/stock/${predictionSymbol}?days=7`, { timeout: 120000 });
+            if ((wantsPrediction(txt) || wantsAgentAction(txt) || pendingPredictionRequest) && predictionSymbol && !attachedImage) {
+                const navigated = runPredictionDesk(predictionSymbol, forecastDays);
+                if (navigated) {
+                    setMessages(p => [...p, {
+                        role: 'assistant',
+                        content: `Opening the Prediction desk for **${predictionSymbol}** now. I will run the ${forecastDays}-day forecast there and show the live chart, forecast range, trust score, risk, sentiment, and news.`
+                    }]);
+                    return;
+                }
+                const r = await axios.get(`${BACKEND_API}/api/stock/${predictionSymbol}?days=${forecastDays}`, { timeout: 120000 });
                 setMessages(p => [...p, { role: 'assistant', content: formatPredictionReply(r.data) }]);
                 return;
             }
 
             const r = await axios.post(`${API}/chat`, {
-                message: imagePreview ? `${txt} [User attached a chart/image for analysis]` : txt,
+                message: attachedImage ? `${txt} [User attached a chart/image for analysis]` : txt,
                 history: updated.filter(m => m.role).slice(-10).map(m => ({ role: m.role, content: m.content })),
                 chat_id: chatId || undefined,
+                image_data: attachedImage || undefined,
+                image_mime: attachedImage ? String(attachedImage).slice(5, String(attachedImage).indexOf(';')) : undefined,
             }, { timeout: 30000 });
             if (r.data.chat_id && !chatId) setChatId(r.data.chat_id);
             setMessages(p => [...p, { role: 'assistant', content: r.data.reply || "Couldn't process that." }]);
+            if (r.data?.data?.agent_action === 'open_prediction' && r.data?.data?.symbol) {
+                runPredictionDesk(r.data.data.symbol, 7);
+            }
             loadChats();
         } catch (err) {
             let errorMsg = "Couldn't reach the analysis engine.";
@@ -344,7 +491,7 @@ const ChatBot = () => {
                         </div>
                         <div style={{ paddingLeft: 38, display: 'flex', alignItems: 'center', gap: 6 }}>
                             {[0, 150, 300].map((d, j) => <div key={j} style={{ width: 8, height: 8, borderRadius: '50%', background: ['#60a5fa', '#818cf8', '#a78bfa'][j], animation: `bounce 1.4s ease-in-out ${d}ms infinite` }} />)}
-                            <span style={{ color: textMuted, fontSize: 12, marginLeft: 6 }}>Analyzing...</span>
+                            <span style={{ color: textMuted, fontSize: 12, marginLeft: 6 }}>Understanding intent and preparing the right tool...</span>
                         </div>
                     </div>
                 )}
@@ -380,7 +527,7 @@ const ChatBot = () => {
                         </motion.div>
                     )}
                 </AnimatePresence>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, borderRadius: 16, padding: '6px 10px', background: inputBg, border: inputBorder }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, borderRadius: 18, padding: '8px 10px', background: inputBg, border: inputBorder, boxShadow: dark ? 'inset 0 1px 0 rgba(255,255,255,0.04)' : '0 8px 24px rgba(15,23,42,0.06)' }}>
                     <input type="file" ref={fileRef} accept="image/*" onChange={pickImage} style={{ display: 'none' }} />
                     <button onClick={() => fileRef.current?.click()} title="Attach chart" style={iconBtnStyle}>
                         <Image style={{ width: 16, height: 16, color: icon }} />
@@ -391,9 +538,9 @@ const ChatBot = () => {
                         value={input}
                         onChange={e => setInput(e.target.value)}
                         onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
-                        placeholder="Ask about any stock..."
+                        placeholder="Ask, upload chart, or say: Agent open AAPL..."
                         disabled={isLoading}
-                        style={{ flex: 1, background: 'none', border: 'none', outline: 'none', fontSize: 15, color: text, padding: '14px 6px', opacity: isLoading ? 0.5 : 1 }}
+                        style={{ flex: 1, background: 'none', border: 'none', outline: 'none', fontSize: 15, color: text, padding: '15px 6px', opacity: isLoading ? 0.5 : 1 }}
                     />
                     <button onClick={() => setShowEmoji(!showEmoji)} style={{ ...iconBtnStyle, background: showEmoji ? 'rgba(59,130,246,0.2)' : 'transparent' }}>
                         <Smile style={{ width: 16, height: 16, color: showEmoji ? '#60a5fa' : icon }} />

@@ -152,6 +152,80 @@ def _magnitude_to_direction_probability(magnitude_values, scale: float):
     return np.clip(0.5 + 0.5 * np.tanh(np.asarray(magnitude_values, dtype=float) / scale), 0.01, 0.99)
 
 
+def _class_rates(labels, preds) -> Dict[str, float]:
+    labels = np.asarray(labels, dtype=int)
+    preds = np.asarray(preds, dtype=int)
+    return {
+        "actual_up_rate": float(np.mean(labels == 1)) if len(labels) else 0.0,
+        "actual_down_rate": float(np.mean(labels == 0)) if len(labels) else 0.0,
+        "predicted_up_rate": float(np.mean(preds == 1)) if len(preds) else 0.0,
+        "predicted_down_rate": float(np.mean(preds == 0)) if len(preds) else 0.0,
+    }
+
+
+def _macro_f1(labels, preds) -> float:
+    return float(f1_score(labels, preds, average="macro", zero_division=0))
+
+
+def _find_validation_threshold(y_true, probs):
+    """Choose a held-out validation threshold that avoids one-class metrics."""
+    best_threshold = 0.5
+    best_score = -1.0
+    best_metrics = {}
+
+    y_true = np.asarray(y_true, dtype=int)
+    probs = np.asarray(probs, dtype=float)
+
+    for threshold in np.arange(0.20, 0.801, 0.01):
+        preds = (probs >= threshold).astype(int)
+        rates = _class_rates(y_true, preds)
+        pred_minority_rate = min(rates["predicted_up_rate"], rates["predicted_down_rate"])
+
+        bal = balanced_accuracy_score(y_true, preds)
+        macro = _macro_f1(y_true, preds)
+        pos_f1 = f1_score(y_true, preds, zero_division=0)
+        neg_f1 = f1_score(1 - y_true, 1 - preds, zero_division=0)
+        mcc_val = matthews_corrcoef(y_true, preds) if len(np.unique(preds)) > 1 else 0.0
+        mcc_scaled = (mcc_val + 1.0) / 2.0
+
+        # Penalize thresholds that collapse into a single class. This is the
+        # failure mode behind high raw accuracy with F1=0.
+        class_balance_penalty = 0.20 if pred_minority_rate < 0.05 else 0.0
+        score = (0.40 * bal) + (0.35 * macro) + (0.20 * mcc_scaled) + (0.05 * min(1.0, pred_minority_rate * 10.0))
+        score -= class_balance_penalty
+
+        if score > best_score:
+            best_score = score
+            best_threshold = threshold
+            best_metrics = {
+                **rates,
+                "balanced_accuracy": float(bal),
+                "macro_f1": float(macro),
+                "positive_f1": float(pos_f1),
+                "negative_f1": float(neg_f1),
+                "mcc": float(mcc_val),
+                "score": float(score),
+            }
+
+    return float(best_threshold), best_metrics
+
+
+def _quality_gate(metrics: Dict[str, float]) -> str:
+    if metrics.get("calibration_samples", 0) < 50:
+        return "limited_samples"
+    if metrics.get("binom_pvalue", 1.0) >= 0.05:
+        return "not_statistically_significant"
+    if metrics.get("macro_f1", 0.0) < 45.0:
+        return "class_imbalance_warning"
+    if metrics.get("balanced_accuracy", 0.0) < 53.0:
+        return "weak_directional_edge"
+    if metrics.get("fold_std_accuracy", 100.0) > 18.0:
+        return "unstable_folds"
+    if metrics.get("auc", 0.5) < 0.52:
+        return "weak_ranking_power"
+    return "validated"
+
+
 def _fit_xgb_classifier(model, X_fit, y_fit, sample_weight=None, X_eval=None, y_eval=None):
     """Fit XGBoost with early stopping only when the validation fold is usable."""
     if X_eval is not None and y_eval is not None and len(np.unique(y_eval)) >= 2 and len(np.unique(y_fit)) >= 2:
@@ -437,7 +511,8 @@ def train_unified_model(ticker: str, generate_charts: bool = False) -> TrainResu
     calibrated_probs = calibrator.calibrate(raw_calib_probs)
 
     buy_threshold, sell_threshold, threshold_scores = _find_optimal_thresholds(meta_y_calib, calibrated_probs)
-    calib_preds = (calibrated_probs >= buy_threshold).astype(int)
+    validation_threshold, validation_threshold_metrics = _find_validation_threshold(meta_y_calib, calibrated_probs)
+    calib_preds = (calibrated_probs >= validation_threshold).astype(int)
 
     accuracy = accuracy_score(meta_y_calib, calib_preds)
     balanced_accuracy = balanced_accuracy_score(meta_y_calib, calib_preds)
@@ -451,6 +526,9 @@ def train_unified_model(ticker: str, generate_charts: bool = False) -> TrainResu
     except Exception:
         tn = fp = fn = tp = 0
     mcc = matthews_corrcoef(meta_y_calib, calib_preds) if len(np.unique(meta_y_calib)) > 1 else 0.0
+    macro_f1 = _macro_f1(meta_y_calib, calib_preds)
+    negative_f1 = f1_score(1 - meta_y_calib, 1 - calib_preds, zero_division=0)
+    class_balance = _class_rates(meta_y_calib, calib_preds)
     brier = brier_score_loss(meta_y_calib, calibrated_probs)
     try:
         auc = roc_auc_score(meta_y_calib, calibrated_probs)
@@ -477,14 +555,27 @@ def train_unified_model(ticker: str, generate_charts: bool = False) -> TrainResu
     underfit_risk = "high" if mean_train_accuracy < 0.54 and mean_val_accuracy < 0.53 else (
         "medium" if mean_train_accuracy < 0.57 and mean_val_accuracy < 0.55 else "low"
     )
+    preliminary_metrics = {
+        "balanced_accuracy": float(balanced_accuracy * 100),
+        "macro_f1": float(macro_f1 * 100),
+        "auc": float(auc),
+        "binom_pvalue": float(binom_pvalue),
+        "fold_std_accuracy": float(np.std(fold_accs) * 100),
+        "calibration_samples": int(n_total),
+    }
+    model_quality_gate = _quality_gate(preliminary_metrics)
 
     print(f"\n{'='*60}")
     print(f"  HELD-OUT METRICS")
     print(f"{'='*60}")
     print(f"  Accuracy:     {accuracy*100:.2f}%")
+    print(f"  Balanced Acc: {balanced_accuracy*100:.2f}%")
     print(f"  AUC-ROC:      {auc:.3f}")
     print(f"  F1:           {f1*100:.2f}%")
+    print(f"  Macro F1:     {macro_f1*100:.2f}%")
     print(f"  p-value:      {binom_pvalue:.4f} {'✅' if binom_pvalue < 0.05 else '⚠️'}")
+    print(f"  Class rates:  actual UP={class_balance['actual_up_rate']:.1%}, predicted UP={class_balance['predicted_up_rate']:.1%}")
+    print(f"  Quality gate: {model_quality_gate}")
     print(f"  Fold mean:    {np.mean(fold_accs)*100:.2f}% ± {np.std(fold_accs)*100:.2f}%")
     print(f"  Train mean:   {mean_train_accuracy*100:.2f}%")
     print(f"  Gen gap:      {mean_generalization_gap*100:.2f}% ({overfit_risk} overfit risk)")
@@ -574,6 +665,7 @@ def train_unified_model(ticker: str, generate_charts: bool = False) -> TrainResu
         "column_hash": final_artifacts.column_hash,
         "feature_importance": importance,
         "buy_threshold": buy_threshold, "sell_threshold": sell_threshold,
+        "validation_threshold": validation_threshold,
         "avg_abs_return": avg_abs_return,
         "lgbm_mag_scale": lgbm_mag_scale,
         "residual_quantiles": residual_quantiles,
@@ -581,6 +673,8 @@ def train_unified_model(ticker: str, generate_charts: bool = False) -> TrainResu
             "accuracy": float(accuracy * 100), "balanced_accuracy": float(balanced_accuracy * 100),
             "precision": float(precision * 100),
             "recall": float(recall * 100), "f1": float(f1 * 100),
+            "macro_f1": float(macro_f1 * 100),
+            "negative_f1": float(negative_f1 * 100),
             "specificity": float(specificity * 100),
             "auc": float(auc), "binom_pvalue": float(binom_pvalue),
             "mcc": float(mcc), "brier_score": float(brier),
@@ -595,6 +689,13 @@ def train_unified_model(ticker: str, generate_charts: bool = False) -> TrainResu
             "calibration_samples": int(n_total),
             "training_samples": int(len(X_all)),
             "n_folds": int(len(fold_results)),
+            "actual_up_rate": float(class_balance["actual_up_rate"] * 100),
+            "actual_down_rate": float(class_balance["actual_down_rate"] * 100),
+            "predicted_up_rate": float(class_balance["predicted_up_rate"] * 100),
+            "predicted_down_rate": float(class_balance["predicted_down_rate"] * 100),
+            "validation_threshold": float(validation_threshold),
+            "validation_threshold_score": float(validation_threshold_metrics.get("score", 0.0)),
+            "model_quality_gate": model_quality_gate,
             "buy_threshold": float(buy_threshold),
             "sell_threshold": float(sell_threshold),
             "threshold_f1": float(threshold_scores.get("f1", 0.0)),
@@ -616,6 +717,23 @@ def train_unified_model(ticker: str, generate_charts: bool = False) -> TrainResu
         "metrics": artifact["metrics"], "selected_features": selected,
         "column_hash": final_artifacts.column_hash, "config": artifact["config"],
     }
+    try:
+        from unified_engine.model_registry import register_unified_model
+        registry_record = register_unified_model(
+            ticker=ticker,
+            model_version=model_version,
+            artifact_path=str(artifact_path),
+            metrics=artifact["metrics"],
+            metadata={"selected_features": selected, "column_hash": final_artifacts.column_hash},
+        )
+        artifact["lifecycle_stage"] = registry_record.get("stage")
+        artifact["promotion"] = registry_record.get("promotion")
+        metadata["lifecycle_stage"] = registry_record.get("stage")
+        metadata["promotion"] = registry_record.get("promotion")
+        joblib.dump(artifact, artifact_path)
+    except Exception as registry_err:
+        metadata["registry_warning"] = str(registry_err)
+        print(f"  ⚠️ Registry promotion skipped: {registry_err}", flush=True)
     (artifact_dir / "metadata.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
 
     print(f"\n  ✅ Saved: {artifact_path}")
@@ -642,7 +760,9 @@ def train_unified_model(ticker: str, generate_charts: bool = False) -> TrainResu
                 })
                 mlflow.log_metrics({
                     "accuracy": float(accuracy),
+                    "balanced_accuracy": float(balanced_accuracy),
                     "f1_score": float(f1),
+                    "macro_f1": float(macro_f1),
                     "auc": float(auc),
                     "binom_pvalue": float(binom_pvalue),
                     "fold_mean_acc": float(np.mean(fold_accs))

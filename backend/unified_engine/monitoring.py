@@ -183,20 +183,24 @@ def get_model_health(ticker: str) -> Dict:
     if not history:
         return {
             "ticker": ticker,
-            "status": "no_data",
+            "status": "monitoring_warming_up",
             "recent_accuracy": None,
-            "needs_retraining": True,
-            "reason": "No prediction history",
+            "needs_retraining": False,
+            "evaluated_count": 0,
+            "min_evaluations": 5,
+            "reason": "Reliability starts after 5 completed forecast evaluations",
         }
 
     evaluated = [h for h in history if h.get("actual_return") is not None]
     if len(evaluated) < 5:
         return {
             "ticker": ticker,
-            "status": "insufficient_evaluations",
+            "status": "monitoring_warming_up",
             "recent_accuracy": None,
             "needs_retraining": False,
-            "reason": f"Only {len(evaluated)} evaluated predictions",
+            "evaluated_count": len(evaluated),
+            "min_evaluations": 5,
+            "reason": f"{len(evaluated)}/5 completed forecast evaluations. Reliability will activate after more predictions mature.",
         }
 
     recent_correct = sum(1 for h in evaluated if h.get("correct"))
@@ -210,6 +214,7 @@ def get_model_health(ticker: str) -> Dict:
         "recent_accuracy": float(recent_accuracy),
         "recent_accuracy_pct": f"{recent_accuracy*100:.1f}%",
         "evaluated_count": len(evaluated),
+        "min_evaluations": 5,
         "needs_retraining": needs_retraining,
         "reason": "Below random baseline" if needs_retraining else "Within acceptable range",
     }

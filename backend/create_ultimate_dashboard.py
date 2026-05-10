@@ -27,13 +27,66 @@ if not stocks:
     print("No successful stocks found.")
     sys.exit(1)
 
-# Sort stocks from best to lowest based on walk-forward accuracy.
-stocks.sort(key=lambda x: x["metrics"].get("accuracy", 0), reverse=True)
+def _negative_f1(metrics):
+    tn = float(metrics.get("true_negative", 0) or 0)
+    fp = float(metrics.get("false_positive", 0) or 0)
+    fn = float(metrics.get("false_negative", 0) or 0)
+    denom = (2 * tn) + fp + fn
+    return 0.0 if denom <= 0 else (2 * tn / denom) * 100.0
+
+def _macro_f1(metrics):
+    if "macro_f1" in metrics:
+        return float(metrics.get("macro_f1") or 0.0)
+    return (float(metrics.get("f1", 0) or 0) + _negative_f1(metrics)) / 2.0
+
+def _class_rates(metrics):
+    tp = float(metrics.get("true_positive", 0) or 0)
+    tn = float(metrics.get("true_negative", 0) or 0)
+    fp = float(metrics.get("false_positive", 0) or 0)
+    fn = float(metrics.get("false_negative", 0) or 0)
+    total = max(tp + tn + fp + fn, 1.0)
+    actual_up = float(metrics.get("actual_up_rate", ((tp + fn) / total) * 100.0) or 0.0)
+    pred_up = float(metrics.get("predicted_up_rate", ((tp + fp) / total) * 100.0) or 0.0)
+    return actual_up, pred_up
+
+def _quality_gate(metrics):
+    pval = float(metrics.get("binom_pvalue", 1.0) or 1.0)
+    bal = float(metrics.get("balanced_accuracy", 0.0) or 0.0)
+    macro = _macro_f1(metrics)
+    auc = float(metrics.get("auc", 0.5) or 0.5)
+    fold_std = float(metrics.get("fold_std_accuracy", 100.0) or 100.0)
+    if pval >= 0.05:
+        return "not significant"
+    if macro < 45.0:
+        return "class imbalance"
+    if bal < 53.0:
+        return "weak edge"
+    if fold_std > 18.0:
+        return "unstable folds"
+    if auc < 0.52:
+        return "weak AUC"
+    return "validated"
+
+def _quality_score(metrics):
+    bal = float(metrics.get("balanced_accuracy", 0.0) or 0.0)
+    macro = _macro_f1(metrics)
+    auc = float(metrics.get("auc", 0.5) or 0.5) * 100.0
+    fold_std = float(metrics.get("fold_std_accuracy", 100.0) or 100.0)
+    stability = max(0.0, 100.0 - (fold_std * 3.0))
+    p_penalty = 12.0 if float(metrics.get("binom_pvalue", 1.0) or 1.0) >= 0.05 else 0.0
+    one_class_penalty = 15.0 if macro < 35.0 else 0.0
+    return max(0.0, (0.35 * bal) + (0.30 * macro) + (0.20 * auc) + (0.15 * stability) - p_penalty - one_class_penalty)
+
+# Sort by validation quality, not raw accuracy, so imbalanced one-class models
+# are pushed down instead of looking artificially strong.
+stocks.sort(key=lambda x: _quality_score(x["metrics"]), reverse=True)
 
 # Extract real metrics only (walk-forward validation)
 tickers = [s["ticker"] for s in stocks]
 accs = [s["metrics"].get("accuracy", 0) for s in stocks]
+balanced_accs = [s["metrics"].get("balanced_accuracy", 0) for s in stocks]
 f1s = [s["metrics"].get("f1", 0) for s in stocks]
+macro_f1s = [_macro_f1(s["metrics"]) for s in stocks]
 aucs = [s["metrics"].get("auc", 0.5) for s in stocks]
 pvals = [s["metrics"].get("binom_pvalue", 1.0) for s in stocks]
 fold_means = [s["metrics"].get("fold_mean_accuracy", 0) for s in stocks]
@@ -41,6 +94,10 @@ fold_stds = [s["metrics"].get("fold_std_accuracy", 0) for s in stocks]
 train_samples = [s["metrics"].get("training_samples", 0) for s in stocks]
 calib_samples = [s["metrics"].get("calibration_samples", 0) for s in stocks]
 fold_counts = [s["metrics"].get("n_folds", 0) for s in stocks]
+actual_up_rates = [_class_rates(s["metrics"])[0] for s in stocks]
+pred_up_rates = [_class_rates(s["metrics"])[1] for s in stocks]
+quality_scores = [_quality_score(s["metrics"]) for s in stocks]
+quality_gates = [_quality_gate(s["metrics"]) for s in stocks]
 
 # Plotting
 plt.rcParams.update({
@@ -58,7 +115,7 @@ plt.rcParams.update({
 fig = plt.figure(figsize=(18, 14))
 fig.suptitle("AI Stock Forecasting Performance Monitor",
              fontsize=20, fontweight="bold", color="#ffffff", y=0.96)
-fig.text(0.5, 0.93, "Metrics from walk-forward validation only (no synthetic backtest estimates)",
+fig.text(0.5, 0.93, "Walk-forward validation with class-balance diagnostics; raw accuracy is not used alone",
          ha="center", fontsize=11, color="#94a3b8")
 
 gs = gridspec.GridSpec(3, 2, height_ratios=[1, 1, 0.6], hspace=0.4, wspace=0.25, top=0.88, bottom=0.05, left=0.05, right=0.95)
@@ -75,23 +132,23 @@ def display_ticker(ticker):
 
 short_tickers = [display_ticker(t) for t in tickers]
 
-# 1. Accuracy
+# 1. Balanced accuracy
 ax1 = fig.add_subplot(gs[0, 0])
-colors1 = [get_color(a, 60, 55) for a in accs]
-bars1 = ax1.bar(short_tickers, accs, color=colors1, width=0.7)
+colors1 = [get_color(a, 58, 53) for a in balanced_accs]
+bars1 = ax1.bar(short_tickers, balanced_accs, color=colors1, width=0.7)
 ax1.axhline(50, color="#475569", ls="--", lw=1)
 ax1.set_ylim(0, 80)
-ax1.set_title("Walk-Forward Directional Accuracy (%)", fontsize=12, fontweight="bold", color="#ffffff")
-for bar, val in zip(bars1, accs):
+ax1.set_title("Walk-Forward Balanced Accuracy (%)", fontsize=12, fontweight="bold", color="#ffffff")
+for bar, val in zip(bars1, balanced_accs):
     ax1.text(bar.get_x() + bar.get_width()/2, val + 1, f"{val:.1f}%", ha="center", fontsize=9)
 
-# 2. F1 Score
+# 2. Macro F1
 ax2 = fig.add_subplot(gs[0, 1])
-colors2 = [get_color(f, 75, 70) for f in f1s]
-bars2 = ax2.bar(short_tickers, f1s, color=colors2, width=0.7)
+colors2 = [get_color(f, 60, 50) for f in macro_f1s]
+bars2 = ax2.bar(short_tickers, macro_f1s, color=colors2, width=0.7)
 ax2.set_ylim(0, 90)
-ax2.set_title("F1 Score (%)", fontsize=12, fontweight="bold", color="#ffffff")
-for bar, val in zip(bars2, f1s):
+ax2.set_title("Macro F1 Score (%)", fontsize=12, fontweight="bold", color="#ffffff")
+for bar, val in zip(bars2, macro_f1s):
     ax2.text(bar.get_x() + bar.get_width()/2, val + 1, f"{val:.1f}%", ha="center", fontsize=9)
 
 # 3. AUC-ROC
@@ -107,35 +164,35 @@ for bar, val in zip(bars3, aucs):
 # 4. Accuracy vs AUC scatter
 ax4 = fig.add_subplot(gs[1, 1])
 for i, t in enumerate(short_tickers):
-    ax4.scatter(aucs[i], accs[i], s=180, color=colors1[i], edgecolor="#ffffff", lw=1.2, zorder=3)
-    ax4.text(aucs[i] + 0.005, accs[i] + 0.6, t, fontsize=9, color="#e2e8f0")
+    ax4.scatter(aucs[i], balanced_accs[i], s=180, color=colors1[i], edgecolor="#ffffff", lw=1.2, zorder=3)
+    ax4.text(aucs[i] + 0.005, balanced_accs[i] + 0.6, t, fontsize=9, color="#e2e8f0")
 ax4.axvline(0.5, color="#475569", ls="--", lw=1)
 ax4.axhline(50, color="#475569", ls="--", lw=1)
 ax4.set_xlim(0.4, 0.75)
 ax4.set_ylim(40, 80)
 ax4.grid(True, zorder=0)
 ax4.set_xlabel("AUC-ROC")
-ax4.set_ylabel("Accuracy (%)")
-ax4.set_title("Accuracy vs AUC-ROC", fontsize=12, fontweight="bold", color="#ffffff")
+ax4.set_ylabel("Balanced Accuracy (%)")
+ax4.set_title("Balanced Accuracy vs AUC-ROC", fontsize=12, fontweight="bold", color="#ffffff")
 
 # 5. Table
 ax5 = fig.add_subplot(gs[2, :])
 ax5.axis("off")
 
-columns = ["Ticker", "Acc %", "F1 %", "AUC", "p-value", "Fold Mean %", "Fold Std %", "Train N", "Calib N", "Folds"]
+columns = ["Ticker", "Score", "Acc %", "Bal Acc %", "Macro F1 %", "AUC", "p-value", "Actual/Pred Up", "Fold Std %", "Gate"]
 cell_text = []
 for i in range(len(tickers)):
     row = [
         short_tickers[i],
+        f"{quality_scores[i]:.1f}",
         f"{accs[i]:.2f}",
-        f"{f1s[i]:.2f}",
+        f"{balanced_accs[i]:.2f}",
+        f"{macro_f1s[i]:.2f}",
         f"{aucs[i]:.3f}",
         f"{pvals[i]:.4f}",
-        f"{fold_means[i]:.2f}",
+        f"{actual_up_rates[i]:.0f}% / {pred_up_rates[i]:.0f}%",
         f"{fold_stds[i]:.2f}",
-        f"{train_samples[i]}",
-        f"{calib_samples[i]}",
-        f"{fold_counts[i]}"
+        quality_gates[i],
     ]
     cell_text.append(row)
 

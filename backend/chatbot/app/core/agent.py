@@ -12,6 +12,7 @@ import logging
 from typing import Optional, Dict, Any, List
 from core.rag_pipeline import rag_pipeline
 from models.schemas import ChatResponse, ChatMessage
+from tools.prediction_tools import prediction_tools
 
 logger = logging.getLogger(__name__)
 
@@ -277,6 +278,20 @@ TRAINED_MODELS_PATTERNS = [
     'which tickers',
 ]
 
+WATCHLIST_PATTERNS = [
+    'rank watchlist',
+    'watchlist ranking',
+    'opportunity radar',
+    'best stock',
+    'which stock should i focus',
+    'compare watchlist',
+    'compare stocks',
+    'rank these',
+    'rank my stocks',
+    'best setup',
+    'top opportunity',
+]
+
 # ── Finance education question patterns ──
 FINANCE_EDUCATION_PATTERNS = [
     'what is', 'what are', 'explain', 'define', 'how does', 'how do',
@@ -437,15 +452,151 @@ class StockAgent:
 
         return None
 
-    async def chat(self, message: str, history: List[ChatMessage] = None) -> ChatResponse:
+    def _extract_symbols(self, query: str) -> List[str]:
+        """Extract up to 10 symbols for watchlist and comparison requests."""
+        query_lower = query.lower()
+        found: List[str] = []
+
+        for company in sorted(COMPANY_TICKERS.keys(), key=len, reverse=True):
+            if company in query_lower:
+                ticker = COMPANY_TICKERS[company]
+                if ticker not in found:
+                    found.append(ticker)
+
+        patterns = [
+            r'\b[A-Z]{2,15}\.[A-Z]{1,2}\b',
+            r'\b[A-Z]{2,5}-USD\b',
+            r'\$([A-Z]{1,5})\b',
+            r'\b[A-Z]{2,5}\b',
+        ]
+        upper_query = query.upper()
+        for pattern in patterns:
+            for match in re.findall(pattern, upper_query):
+                ticker = match if isinstance(match, str) else match[0]
+                if ticker not in TICKER_BLACKLIST and ticker not in found:
+                    found.append(ticker)
+
+        return found[:10]
+
+    def _is_watchlist_request(self, query: str) -> bool:
+        query_lower = query.lower().strip()
+        return any(pattern in query_lower for pattern in WATCHLIST_PATTERNS)
+
+    def _detect_language_instruction(self, query: str) -> Optional[str]:
+        query_lower = query.lower()
+        languages = {
+            'hindi': 'Hindi',
+            'telugu': 'Telugu',
+            'tamil': 'Tamil',
+            'kannada': 'Kannada',
+            'malayalam': 'Malayalam',
+            'marathi': 'Marathi',
+            'bengali': 'Bengali',
+            'english': 'English',
+        }
+        for key, label in languages.items():
+            if key in query_lower or f'in {key}' in query_lower:
+                return label
+        return None
+
+    async def _watchlist_response(self, message: str) -> ChatResponse:
+        """Rank a user watchlist with the same guarded model outputs as the app."""
+        symbols = self._extract_symbols(message)
+        if not symbols:
+            symbols = ["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA"]
+
+        ranking = await prediction_tools.rank_watchlist(symbols)
+        rows = ranking.get("ranked", [])
+        language = self._detect_language_instruction(message)
+
+        lines = [
+            "AI Watchlist Ranking - Opportunity Radar",
+            "",
+            "I ranked the watchlist using live price, validated model quality, risk-adjusted edge, lifecycle stage, and failed promotion checks.",
+        ]
+        if language and language != "English":
+            lines.append(f"Language requested: {language}. Ticker symbols and numbers are kept unchanged for clarity.")
+
+        if not rows:
+            lines.append("No ranked stocks are available yet. Try adding exchange-listed symbols like AAPL, NVDA, RELIANCE.NS, or TCS.NS.")
+            return ChatResponse(reply="\n".join(lines), stock=None, data={"agent_action": "watchlist_rank", "ranking": ranking})
+
+        lines.extend([
+            "",
+            "| Rank | Stock | Signal | Score | Stage | Why |",
+            "| --- | --- | --- | ---: | --- | --- |",
+        ])
+        for idx, row in enumerate(rows, start=1):
+            signal = row.get("signal") or row.get("status") or "WAIT"
+            score = row.get("score", 0)
+            stage = row.get("stage") or row.get("status") or "not_ready"
+            why = row.get("why") or "Waiting for validated model output."
+            lines.append(f"| {idx} | {row.get('symbol')} | {signal} | {score} | {stage} | {why} |")
+
+        top = rows[0]
+        lines.extend([
+            "",
+            f"Top focus: {top.get('symbol')} has the best current risk-adjusted score in this watchlist.",
+            "Use this as decision support only. If a model is candidate or quarantined, wait for stronger validation before trusting the signal.",
+        ])
+
+        return ChatResponse(
+            reply="\n".join(lines),
+            stock=top.get("symbol"),
+            data={"agent_action": "watchlist_rank", "ranking": ranking},
+        )
+
+    async def chat(
+        self,
+        message: str,
+        history: List[ChatMessage] = None,
+        image_data: Optional[str] = None,
+        image_mime: Optional[str] = None,
+    ) -> ChatResponse:
         """Main chat interface — the brain of the chatbot"""
         if history is None:
             history = []
+
+        if image_data:
+            symbol = self._extract_symbol(message)
+            if symbol:
+                prediction = await prediction_tools.get_latest_prediction(symbol)
+                factors = prediction.key_factors if prediction else ["Model output is not ready yet."]
+                reply = (
+                    f"I received your uploaded chart/image for **{symbol}**.\n\n"
+                    "I can combine the uploaded context with the live model desk, but this local chatbot does not yet run a vision model to read every candle pixel from the image. "
+                    "Here is the grounded model context I can verify now:\n\n"
+                    + "\n".join(f"- {factor}" for factor in factors)
+                    + "\n\nAgent action: open the Prediction page for this ticker to inspect the live chart, forecast range, sentiment, and model-quality gates."
+                )
+                return ChatResponse(
+                    reply=reply,
+                    stock=symbol,
+                    data={
+                        "agent_action": "open_prediction",
+                        "symbol": symbol,
+                        "image_received": True,
+                        "image_mime": image_mime,
+                    },
+                )
+
+            return ChatResponse(
+                reply=(
+                    "I received the uploaded chart/image. Send the ticker too, for example **analyze AAPL from this chart**, "
+                    "and I will open the prediction desk and combine it with live ML signals."
+                ),
+                stock=None,
+                data={"agent_action": "await_symbol", "image_received": True, "image_mime": image_mime},
+            )
 
         # Step 0: Check if asking about trained models (BEFORE symbol extraction!)
         if self._is_asking_about_trained_models(message):
             logger.info("🧠 User is asking about trained models — returning stock list")
             return self._get_trained_stocks_response()
+
+        if self._is_watchlist_request(message):
+            logger.info("User requested watchlist ranking")
+            return await self._watchlist_response(message)
 
         # Step 1: Topic filtering
         if not self._is_stock_related(message):

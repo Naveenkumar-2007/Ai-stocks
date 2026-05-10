@@ -20,7 +20,8 @@ const PREDICTION_STORAGE_KEYS = {
   news: 'prediction_news',
   trainingStatus: 'prediction_training_status',
   days: 'prediction_days',
-  watchlist: 'prediction_watchlist'
+  watchlist: 'prediction_watchlist',
+  agentCommand: 'prediction_agent_command'
 };
 
 const normalizeForecastDays = (value) => {
@@ -874,6 +875,16 @@ function Prediction() {
   const [watchlistLoading, setWatchlistLoading] = useState(false);
   const [watchlistError, setWatchlistError] = useState(null);
   const [showWatchlistDesk, setShowWatchlistDesk] = useState(false);
+  const [agentMode, setAgentMode] = useState({
+    active: false,
+    symbol: '',
+    step: 'idle',
+    message: ''
+  });
+  const searchInputRef = useRef(null);
+  const daysSelectRef = useRef(null);
+  const predictButtonRef = useRef(null);
+  const agentTimersRef = useRef([]);
   const chartTheme = {
     panel: isDark ? 'bg-[#0b1220] border-slate-700/70' : 'bg-white/95 border-gray-200',
     plot: isDark ? 'bg-slate-950/60 border-slate-800' : 'bg-slate-50 border-gray-200',
@@ -994,6 +1005,8 @@ function Prediction() {
 
   useEffect(() => {
     return () => {
+      agentTimersRef.current.forEach((timer) => clearTimeout(timer));
+      agentTimersRef.current = [];
       if (hideSuggestionsTimeoutRef.current) {
         clearTimeout(hideSuggestionsTimeoutRef.current);
         hideSuggestionsTimeoutRef.current = null;
@@ -1171,6 +1184,17 @@ function Prediction() {
           : separateSentiment || null
       );
       setNews(newsRes.data.news || []);
+      setAgentMode((prev) => prev.active ? {
+        ...prev,
+        step: 'running',
+        message: `${payload?.ticker || symbol} result is loaded. Review the chart, forecast range, trust score, risk, sentiment, and news.`
+      } : prev);
+      if (agentTimersRef.current) {
+        const timer = setTimeout(() => {
+          setAgentMode((prev) => prev.active ? { ...prev, active: false } : prev);
+        }, 3500);
+        agentTimersRef.current.push(timer);
+      }
 
       // Track user stats
       if (trackStats && currentUser?.email) {
@@ -1185,6 +1209,11 @@ function Prediction() {
         ? 'Backend API is not reachable. Start the backend on port 8000, then search again.'
         : null;
       setError(backendMessage || timeoutMessage || offlineMessage || 'Failed to fetch data');
+      setAgentMode((prev) => prev.active ? {
+        ...prev,
+        step: 'running',
+        message: backendMessage || timeoutMessage || offlineMessage || 'The agent could not complete this prediction request.'
+      } : prev);
       console.error(err);
     } finally {
       if (!silent) setLoading(false);
@@ -1214,6 +1243,145 @@ function Prediction() {
     setShowSuggestions(false);
     setVisibleNewsCount(3); // Reset news count on new search
   };
+
+  useEffect(() => {
+    const runAgentCommand = (rawCommand) => {
+      let command = rawCommand;
+      if (typeof rawCommand === 'string') {
+        try {
+          command = JSON.parse(rawCommand);
+        } catch {
+          command = null;
+        }
+      }
+      const symbol = String(command?.symbol || '').trim().toUpperCase();
+      const nextDays = normalizeForecastDays(command?.days || days);
+      if (command?.type === 'watchlist') {
+        const commandSymbols = [...new Set((command?.symbols || []).map((item) => String(item).trim().toUpperCase()).filter(Boolean))].slice(0, 8);
+        agentTimersRef.current.forEach((timer) => clearTimeout(timer));
+        agentTimersRef.current = [];
+        setAgentMode({
+          active: true,
+          symbol: 'WATCHLIST',
+          step: 'ticker',
+          message: commandSymbols.length
+            ? `Agent is loading ${commandSymbols.join(', ')} into Opportunity Radar.`
+            : 'Agent is opening AI Watchlist Ranking - Opportunity Radar.'
+        });
+        if (commandSymbols.length) {
+          setWatchlist(commandSymbols);
+        }
+        setDays(nextDays);
+        const openTimer = setTimeout(() => {
+          setShowWatchlistDesk(true);
+          setAgentMode({
+            active: true,
+            symbol: 'WATCHLIST',
+            step: 'predict',
+            message: `Agent is clicking Rank Watchlist and loading ${nextDays}-day comparison charts.`
+          });
+          analyzeWatchlist(commandSymbols.length ? commandSymbols : undefined, nextDays);
+        }, 800);
+        const hideTimer = setTimeout(() => {
+          setAgentMode((prev) => prev.active ? { ...prev, active: false } : prev);
+        }, 5200);
+        agentTimersRef.current.push(openTimer, hideTimer);
+        return;
+      }
+      if (!symbol) return;
+
+      agentTimersRef.current.forEach((timer) => clearTimeout(timer));
+      agentTimersRef.current = [];
+      setAgentMode({
+        active: true,
+        symbol,
+        step: 'ticker',
+        message: `Agent is entering ${symbol} in the live search box.`
+      });
+
+      const schedule = (delay, fn) => {
+        const timer = setTimeout(fn, delay);
+        agentTimersRef.current.push(timer);
+      };
+
+      schedule(450, () => {
+        searchInputRef.current?.focus();
+        setTicker('');
+        setSuggestions([]);
+        setShowSuggestions(false);
+      });
+
+      symbol.split('').forEach((letter, index) => {
+        schedule(850 + index * 220, () => {
+          setTicker(symbol.slice(0, index + 1));
+          setAgentMode({
+            active: true,
+            symbol,
+            step: 'ticker',
+            message: `Agent is typing ${symbol.slice(0, index + 1)} in the live search box.`
+          });
+        });
+      });
+
+      const afterTyping = 1000 + symbol.length * 220;
+
+      schedule(afterTyping + 700, () => {
+        setAgentMode({
+          active: true,
+          symbol,
+          step: 'days',
+          message: `Agent selected ${nextDays === 1 ? '1 Day' : `${nextDays} Days`} forecast horizon.`
+        });
+        setDays(nextDays);
+        daysSelectRef.current?.focus();
+      });
+
+      schedule(afterTyping + 1600, () => {
+        setAgentMode({
+          active: true,
+          symbol,
+          step: 'predict',
+          message: 'Agent is clicking Predict and starting the ML workflow.'
+        });
+        predictButtonRef.current?.focus();
+      });
+
+      schedule(afterTyping + 2500, () => {
+        setHasSearched(true);
+        setVisibleNewsCount(3);
+        predictButtonRef.current?.focus();
+        fetchStockData(symbol, { overrideDays: nextDays });
+      });
+
+      schedule(afterTyping + 4900, () => {
+        setAgentMode((prev) => ({
+          ...prev,
+          step: 'running',
+          message: 'Agent is watching the prediction desk for live price, charts, trust score, and model status.'
+        }));
+      });
+    };
+
+    const savedCommand = sessionStorage.getItem(PREDICTION_STORAGE_KEYS.agentCommand);
+    if (savedCommand) {
+      sessionStorage.removeItem(PREDICTION_STORAGE_KEYS.agentCommand);
+      runAgentCommand(savedCommand);
+    } else {
+      const params = new URLSearchParams(window.location.search);
+      const symbol = params.get('agentStock');
+      const action = params.get('agentAction');
+      if (action === 'watchlist') {
+        const symbols = (params.get('symbols') || '').split(',').map((item) => item.trim()).filter(Boolean);
+        runAgentCommand({ type: 'watchlist', symbols, days: params.get('days') || days });
+      } else if (symbol) {
+        runAgentCommand({ type: 'predict', symbol, days });
+      }
+    }
+
+    const handler = (event) => runAgentCommand(event.detail || {});
+    window.addEventListener('datavision:agent-predict', handler);
+    return () => window.removeEventListener('datavision:agent-predict', handler);
+  }, []);
 
   const handleLoadMoreNews = () => {
     setVisibleNewsCount(prev => prev + 3);
@@ -1366,8 +1534,9 @@ function Prediction() {
     };
   };
 
-  const analyzeWatchlist = async () => {
-    const symbols = [...new Set((watchlist || []).map((item) => item.trim().toUpperCase()).filter(Boolean))].slice(0, 8);
+  const analyzeWatchlist = async (overrideSymbols, overrideDays = 7) => {
+    const sourceSymbols = overrideSymbols && overrideSymbols.length ? overrideSymbols : watchlist;
+    const symbols = [...new Set((sourceSymbols || []).map((item) => item.trim().toUpperCase()).filter(Boolean))].slice(0, 8);
     if (symbols.length === 0) return;
     setWatchlistLoading(true);
     setWatchlistError(null);
@@ -1384,7 +1553,7 @@ function Prediction() {
     try {
       const results = await Promise.all(symbols.map(async (symbol) => {
         try {
-          const { data } = await axios.get(`${API_BASE}/api/stock/${symbol}?days=7`, { headers, timeout: 120000 });
+          const { data } = await axios.get(`${API_BASE}/api/stock/${symbol}?days=${normalizeForecastDays(overrideDays)}`, { headers, timeout: 120000 });
           return buildWatchlistRow(data);
         } catch (err) {
           return {
@@ -1669,6 +1838,11 @@ function Prediction() {
   const trustLabel = modelTrust.label || 'Trust pending';
   const marketRegime = stockData?.market_regime || {};
   const reliability = stockData?.reliability || {};
+  const reliabilityStatus = String(reliability.status || 'tracking').replace(/_/g, ' ');
+  const reliabilityEvaluated = Number(reliability.evaluated_count ?? 0);
+  const reliabilityMinimum = Number(reliability.min_evaluations ?? 5);
+  const reliabilityProgress = Math.max(0, Math.min(100, reliabilityMinimum > 0 ? (reliabilityEvaluated / reliabilityMinimum) * 100 : 0));
+  const reliabilityWarming = ['monitoring_warming_up', 'insufficient_evaluations', 'no_data', 'tracking'].includes(String(reliability.status || 'tracking'));
   const riskProfile = stockData?.risk_profile || {};
   const backtestMetrics = stockData?.backtest_metrics || {};
   const predictionHorizon = stockData?.prediction_horizon || {};
@@ -2307,19 +2481,70 @@ function Prediction() {
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-[#070b12] py-0">
+      {agentMode.active && (
+        <div className="fixed inset-x-0 top-[86px] z-[70] pointer-events-none px-4">
+          <div className="mx-auto max-w-[980px] rounded-2xl border border-cyan-300/70 dark:border-cyan-400/40 bg-white/95 dark:bg-slate-950/95 shadow-[0_18px_60px_rgba(6,182,212,0.24)] backdrop-blur-xl overflow-hidden">
+            <div className="flex items-center gap-4 px-5 py-4">
+              <div className="relative h-12 w-12 rounded-2xl bg-cyan-500/15 border border-cyan-300/60 flex items-center justify-center">
+                <Activity className="h-6 w-6 text-cyan-600 dark:text-cyan-300" />
+                <span className="absolute -right-1 -top-1 h-3 w-3 rounded-full bg-emerald-400 animate-pulse" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-black uppercase tracking-[0.24em] text-cyan-600 dark:text-cyan-300">Agentic Prediction Mode</p>
+                <h3 className="text-lg font-black text-slate-950 dark:text-white">
+                  Operating Prediction Desk for {agentMode.symbol}
+                </h3>
+                <p className="text-sm text-slate-600 dark:text-slate-300">{agentMode.message}</p>
+              </div>
+              <div className="hidden sm:flex items-center gap-2 text-xs font-black text-slate-500 dark:text-slate-400">
+                {[
+                  ['ticker', 'Enter ticker'],
+                  ['days', 'Select days'],
+                  ['predict', 'Click Predict'],
+                  ['running', 'Read result']
+                ].map(([step, label]) => (
+                  <span
+                    key={step}
+                    className={`rounded-full px-3 py-1 border ${
+                      agentMode.step === step
+                        ? 'border-cyan-400 bg-cyan-500/15 text-cyan-700 dark:text-cyan-200'
+                        : 'border-slate-200 dark:border-slate-700'
+                    }`}
+                  >
+                    {label}
+                  </span>
+                ))}
+              </div>
+            </div>
+            <div className="h-1 bg-slate-100 dark:bg-slate-800">
+              <div
+                className="h-full bg-cyan-500 transition-all duration-500"
+                style={{
+                  width: agentMode.step === 'ticker' ? '25%' : agentMode.step === 'days' ? '50%' : agentMode.step === 'predict' ? '75%' : '100%'
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
       {/* Search Header */}
       <div className="sticky top-0 z-40 border-b border-slate-200 dark:border-slate-800 bg-white/95 dark:bg-[#0b1220]/95 backdrop-blur-xl shadow-sm">
         <div className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 py-3">
           <form onSubmit={handleSearch} className="grid grid-cols-1 md:grid-cols-[minmax(280px,1fr)_150px_130px] gap-3 items-center">
             <div className="relative w-full">
               <input
+                ref={searchInputRef}
                 type="text"
                 value={ticker}
                 onChange={(e) => handleTickerInput(e.target.value)}
                 onFocus={handleInputFocus}
                 onBlur={handleInputBlur}
                 placeholder="Enter ticker (e.g., AAPL)"
-                className="w-full px-4 py-2.5 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-900 dark:text-white rounded-md focus:ring-2 focus:ring-cyan-500 focus:border-transparent transition text-sm touch-target"
+                className={`w-full px-4 py-2.5 border bg-white dark:bg-slate-950 text-slate-900 dark:text-white rounded-md focus:ring-2 focus:ring-cyan-500 focus:border-transparent transition text-sm touch-target ${
+                  agentMode.active && agentMode.step === 'ticker'
+                    ? 'border-cyan-400 ring-4 ring-cyan-400/25 shadow-[0_0_0_4px_rgba(34,211,238,0.16)]'
+                    : 'border-slate-300 dark:border-slate-700'
+                }`}
               />
               {showSuggestions && suggestions.length > 0 && (
                 <div className="absolute z-50 mt-2 w-full bg-white dark:bg-dark-card border border-cyan-500/30 dark:border-cyan-500/40 rounded-xl shadow-[0_15px_35px_rgba(0,0,0,0.2)] dark:shadow-[0_15px_35px_rgba(0,0,0,0.5)] overflow-hidden max-h-64 overflow-y-auto ring-1 ring-black ring-opacity-5">
@@ -2349,9 +2574,14 @@ function Prediction() {
               )}
             </div>
             <select
+              ref={daysSelectRef}
               value={days}
               onChange={(e) => handleDaysChange(e.target.value)}
-              className="w-full px-4 py-2.5 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-900 dark:text-white rounded-md focus:ring-2 focus:ring-cyan-500 text-sm touch-target"
+              className={`w-full px-4 py-2.5 border bg-white dark:bg-slate-950 text-slate-900 dark:text-white rounded-md focus:ring-2 focus:ring-cyan-500 text-sm touch-target ${
+                agentMode.active && agentMode.step === 'days'
+                  ? 'border-cyan-400 ring-4 ring-cyan-400/25 shadow-[0_0_0_4px_rgba(34,211,238,0.16)]'
+                  : 'border-slate-300 dark:border-slate-700'
+              }`}
             >
               {FORECAST_HORIZONS.map((horizon) => (
                 <option key={horizon} value={horizon}>
@@ -2360,8 +2590,13 @@ function Prediction() {
               ))}
             </select>
             <button
+              ref={predictButtonRef}
               type="submit"
-              className="w-full bg-cyan-600 hover:bg-cyan-500 text-white px-5 py-2.5 rounded-md flex items-center justify-center gap-2 transition active:scale-95 text-sm font-bold touch-target shadow-lg hover:shadow-cyan-500/25"
+              className={`w-full bg-cyan-600 hover:bg-cyan-500 text-white px-5 py-2.5 rounded-md flex items-center justify-center gap-2 transition active:scale-95 text-sm font-bold touch-target shadow-lg hover:shadow-cyan-500/25 ${
+                agentMode.active && agentMode.step === 'predict'
+                  ? 'ring-4 ring-cyan-400/35 scale-[1.02]'
+                  : ''
+              }`}
             >
               <Search className="w-5 h-5" />
               Predict
@@ -3737,16 +3972,28 @@ function Prediction() {
                     <p className="text-xs font-black uppercase text-gray-500 dark:text-gray-400">Reliability</p>
                     <span className={`text-[10px] font-black uppercase px-2 py-1 rounded-md ${reliability.needs_retraining
                       ? 'bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300'
-                      : 'bg-green-100 text-green-700 dark:bg-green-500/15 dark:text-green-300'
+                      : reliabilityWarming
+                        ? 'bg-cyan-100 text-cyan-700 dark:bg-cyan-500/15 dark:text-cyan-300'
+                        : 'bg-green-100 text-green-700 dark:bg-green-500/15 dark:text-green-300'
                       }`}>
-                      {reliability.status || 'tracking'}
+                      {reliabilityWarming ? 'Monitoring warming up' : reliabilityStatus}
                     </span>
                   </div>
                   <p className="text-xs text-gray-600 dark:text-gray-400 mt-2">
-                    {Array.isArray(modelTrust.reasons) && modelTrust.reasons.length > 0
-                      ? modelTrust.reasons.join('. ')
-                      : reliability.reason || 'Reliability tracking will improve as predictions are evaluated.'}
+                    {reliabilityWarming
+                      ? `Real-world reliability activates after completed forecasts mature. Progress: ${reliabilityEvaluated}/${reliabilityMinimum} evaluated predictions.`
+                      : Array.isArray(modelTrust.reasons) && modelTrust.reasons.length > 0
+                        ? modelTrust.reasons.join('. ')
+                        : reliability.reason || 'Reliability tracking will improve as predictions are evaluated.'}
                   </p>
+                  {reliabilityWarming && (
+                    <div className="mt-3 h-2 rounded-full bg-gray-200 dark:bg-gray-800 overflow-hidden">
+                      <div
+                        className="h-full rounded-full bg-gradient-to-r from-cyan-500 to-blue-500 transition-all duration-700"
+                        style={{ width: `${Math.max(8, reliabilityProgress)}%` }}
+                      />
+                    </div>
+                  )}
                 </div>
                 <div className="mt-3 grid grid-cols-2 gap-3">
                   <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/60 p-3">

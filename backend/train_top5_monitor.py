@@ -157,6 +157,9 @@ if HAS_MPL:
             ("Precision",  f"{m.get('precision',0):.1f}%"),
             ("Recall",     f"{m.get('recall',0):.1f}%"),
             ("F1 Score",   f"{m.get('f1',0):.1f}%"),
+            ("Macro F1",   f"{m.get('macro_f1',0):.1f}%"),
+            ("Bal Acc",    f"{m.get('balanced_accuracy',0):.1f}%"),
+            ("Quality",    str(m.get('model_quality_gate','n/a')).replace("_", " ").upper()),
             ("p-value",    f"{m.get('binom_pvalue',1):.4f}"),
             ("Overfit",    str(m.get('overfit_risk','n/a')).upper()),
             ("Underfit",   str(m.get('underfit_risk','n/a')).upper()),
@@ -266,6 +269,9 @@ if HAS_MPL:
         avg_acc = np.mean(accs)
         avg_auc = np.mean(aucs)
         avg_f1 = np.mean([results[t].metrics.get("f1", 0) for t in successful])
+        avg_bal = np.mean([results[t].metrics.get("balanced_accuracy", 0) for t in successful])
+        avg_macro_f1 = np.mean([results[t].metrics.get("macro_f1", 0) for t in successful])
+        validated_count = sum(1 for t in successful if results[t].metrics.get("model_quality_gate") == "validated")
         sig_count = sum(1 for t in successful if results[t].metrics.get("binom_pvalue", 1) < 0.05)
         us_acc = np.mean([results[t].metrics.get("accuracy",0) for t in successful if not t.endswith(".NS")])
         in_accs = [results[t].metrics.get("accuracy",0) for t in successful if t.endswith(".NS")]
@@ -281,10 +287,12 @@ if HAS_MPL:
         lines = [
             ("Verdict", verdict, verdict_color, 18),
             ("Avg Accuracy", f"{avg_acc:.1f}%", "#38bdf8", 16),
+            ("Avg Bal Acc", f"{avg_bal:.1f}%", "#38bdf8", 16),
             ("Avg AUC-ROC", f"{avg_auc:.3f}", "#38bdf8", 16),
-            ("Avg F1", f"{avg_f1:.1f}%", "#38bdf8", 16),
+            ("Avg Macro F1", f"{avg_macro_f1:.1f}%", "#38bdf8", 16),
             ("US Avg", f"{us_acc:.1f}%", "#e2e8f0", 14),
             ("India Avg", f"{in_acc:.1f}%" if in_accs else "N/A", "#e2e8f0", 14),
+            ("Validated", f"{validated_count}/{len(successful)}", "#e2e8f0", 14),
             ("Significant", f"{sig_count}/{len(successful)}", "#e2e8f0", 14),
             ("Trained", f"{len(successful)}/{len(STOCKS)}", "#e2e8f0", 14),
             ("Time", f"{total_elapsed:.0f}s", "#94a3b8", 12),
@@ -307,8 +315,8 @@ if HAS_MPL:
     # -----------------------------------------------------------------
     if len(successful) >= 2:
         fig, ax = plt.subplots(figsize=(14, max(4, len(successful) * 0.8 + 1)))
-        metric_keys = ["accuracy", "precision", "recall", "f1", "auc"]
-        metric_labels = ["Accuracy", "Precision", "Recall", "F1", "AUC"]
+        metric_keys = ["accuracy", "balanced_accuracy", "macro_f1", "f1", "auc"]
+        metric_labels = ["Accuracy", "Bal Acc", "Macro F1", "Pos F1", "AUC"]
         hlabels = [t.replace(".NS","(IN)") for t in successful]
         data_matrix = np.array([
             [results[t].metrics.get(mk, 0) * (100 if mk == "auc" else 1) for mk in metric_keys]
@@ -369,13 +377,19 @@ successful = [t for t in STOCKS if results[t].success]
 failed = [t for t in STOCKS if not results[t].success]
 if successful:
     avg_acc = np.mean([results[t].metrics.get("accuracy", 0) for t in successful])
+    avg_bal = np.mean([results[t].metrics.get("balanced_accuracy", 0) for t in successful])
     avg_auc = np.mean([results[t].metrics.get("auc", 0.5) for t in successful])
     avg_f1 = np.mean([results[t].metrics.get("f1", 0) for t in successful])
+    avg_macro_f1 = np.mean([results[t].metrics.get("macro_f1", 0) for t in successful])
+    validated = sum(1 for t in successful if results[t].metrics.get("model_quality_gate") == "validated")
     sig = sum(1 for t in successful if results[t].metrics.get("binom_pvalue", 1) < 0.05)
     print(f"\n  Trained:   {len(successful)}/{len(STOCKS)}")
     print(f"  Avg Acc:   {avg_acc:.2f}%")
+    print(f"  Avg Bal:   {avg_bal:.2f}%")
     print(f"  Avg AUC:   {avg_auc:.3f}")
     print(f"  Avg F1:    {avg_f1:.2f}%")
+    print(f"  Avg Macro: {avg_macro_f1:.2f}%")
+    print(f"  Validated: {validated}/{len(successful)}")
     print(f"  Sig (p<.05): {sig}/{len(successful)}")
     print()
     for t in STOCKS:
@@ -383,8 +397,10 @@ if successful:
         if r.success:
             m = r.metrics
             sig_mark = "✅" if m.get("binom_pvalue", 1) < 0.05 else "⚠️"
-            print(f"    {t:15s}  acc={m.get('accuracy',0):5.1f}%  auc={m.get('auc',0):.3f}  "
-                  f"f1={m.get('f1',0):5.1f}%  p={m.get('binom_pvalue',1):.4f} {sig_mark}  ({timings[t]:.0f}s)")
+            gate = str(m.get("model_quality_gate", "n/a")).replace("_", "-")
+            print(f"    {t:15s}  acc={m.get('accuracy',0):5.1f}%  bal={m.get('balanced_accuracy',0):5.1f}%  "
+                  f"macro={m.get('macro_f1',0):5.1f}%  auc={m.get('auc',0):.3f}  "
+                  f"p={m.get('binom_pvalue',1):.4f} {sig_mark}  gate={gate}  ({timings[t]:.0f}s)")
         else:
             print(f"    {t:15s}  ❌ {r.reason}")
 if failed:

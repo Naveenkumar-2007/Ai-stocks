@@ -1,6 +1,6 @@
 ---
 title: AI Stock Predictor
-emoji: 📈
+emoji: chart_with_upwards_trend
 colorFrom: blue
 colorTo: green
 sdk: docker
@@ -8,148 +8,155 @@ pinned: false
 app_port: 7860
 ---
 
-# AI Stock Predictor & MLOps Platform
+# AI Stock Predictor and MLOps Platform
 
-Production-style stock prediction system with a React dashboard, Flask API, multi-provider market data fallbacks, guarded BUY/HOLD/SELL recommendations, quantile price ranges, and monitoring artifacts generated from walk-forward model validation.
+Datavision is an end-to-end AI/ML stock analysis platform with a React trading dashboard, Flask prediction API, FastAPI agentic chatbot, multi-market data fallbacks, walk-forward model validation, model-quality gates, and monitoring artifacts.
 
-> This project is for research and education. It is not financial advice.
+> Research and education only. This project is not financial advice.
 
-## Current Status
+## Current Portfolio
 
-Latest retrain: `2026-05-08`
+Latest portfolio retrain: `2026-05-10`
 
-The current portfolio run trained all 10 configured stocks:
+Configured production watchlist:
 
-`AAPL`, `MSFT`, `GOOGL`, `AMZN`, `NVDA`, `RELIANCE.NS`, `TCS.NS`, `INFY.NS`, `TSLA`, `META`
+`AAPL`, `MSFT`, `GOOGL`, `AMZN`, `NVDA`, `RELIANCE.NS`, `TCS.NS`, `HDFCBANK.NS`, `INFY.NS`, `ICICIBANK.NS`
 
 Latest aggregate metrics from [multimarket_summary.json](backend/monitoring/reports/multimarket_summary.json):
 
 | Metric | Value |
 | --- | ---: |
 | Models trained | 10 / 10 |
-| Average accuracy | 60.41% |
-| Average AUC | 0.614 |
-| Average F1 | 46.61% |
+| Average raw accuracy | 62.18% |
+| Average balanced accuracy | 50.54% |
+| Average AUC | 0.593 |
+| Average positive-class F1 | 40.28% |
+| Average macro-F1 | 38.92% |
 | Statistically significant models, p < 0.05 | 7 / 10 |
 
 Latest signal evaluation from [top10_signal_evaluation.json](backend/monitoring/reports/top10_signal_evaluation.json):
 
 | Signal | Stocks |
 | --- | --- |
-| BUY | AAPL, GOOGL, AMZN, NVDA |
-| HOLD | MSFT, TSLA, META, INFY.NS, TCS.NS, RELIANCE.NS |
+| BUY | AAPL, GOOGL, NVDA |
+| HOLD | MSFT, AMZN, RELIANCE.NS, TCS.NS, HDFCBANK.NS, INFY.NS |
+| SELL | ICICIBANK.NS |
 
-The guarded decision engine intentionally holds weak, overfit, or low-confidence models instead of forcing aggressive BUY/SELL calls.
+The decision engine is intentionally conservative. Weak validation, class imbalance, poor fold stability, or insufficient monitoring history reduces signal strength instead of forcing unrealistic BUY/SELL output.
 
-## What Is Implemented
+## Key Features
 
-- Unified Engine v5.2 model artifacts saved per ticker under `backend/unified_engine/models`.
+- React prediction dashboard with dark/light theme support.
+- TradingView-style chart workspace with candles, volume, SMA, forecast ranges, signal markers, entry, stop, and targets.
+- Range-first forecast display using 10th to 90th percentile price bands.
+- AI Watchlist Ranking / Opportunity Radar for comparing multiple stocks.
+- Live price, currency, exchange, technical indicators, sentiment, latest news, model trust, risk, and market regime.
+- Agentic chatbot that can:
+  - answer platform and stock-analysis questions,
+  - understand company names and ticker symbols,
+  - open the prediction page and visibly operate the search flow,
+  - type the ticker, select forecast horizon, click Predict, and show results,
+  - open Opportunity Radar for multi-stock comparison,
+  - rank watchlists by risk-adjusted ML opportunity score,
+  - accept uploaded chart images as context,
+  - avoid fake image interpretation when no vision model is available.
+- Persistent chat sessions and thumbs-up/thumbs-down learning hooks.
+- First-time or untrained stocks show live market analysis and training state instead of fake predictions.
+- Reliability monitoring now shows a clear warming-up state until enough completed forecasts mature.
+
+## ML And MLOps
+
+- Unified Engine v5.2 model artifacts per ticker.
 - Leak-resistant feature selection using train-only windows.
-- Walk-forward validation with purge/embargo style time-series evaluation.
+- Walk-forward validation for time-series evaluation.
 - Per-fold scaler fitting to avoid train/test contamination.
-- Overfit and underfit diagnostics saved into model metadata.
-- Adaptive class weighting for imbalanced directional targets.
-- Probability calibration and threshold-aware BUY/HOLD/SELL gating.
-- Quantile price ranges for forecast display.
-- Volatility-based fallback ranges if quantile outputs are unavailable.
-- Frontend forecast table shows price ranges, move ranges, and percent move ranges instead of exact target prices.
-- Multi-provider data fallback with API key rotation:
-  - Twelve Data
-  - Finnhub
-  - Alpha Vantage
-  - Yahoo Finance fallback for supported symbols
-- Indian symbol support:
-  - `INFY.NS` maps to Twelve Data `INFY` + `NSE`
-  - `TCS.NS` can fall back to Alpha Vantage `TCS.BSE`
-  - `RELIANCE.NS` can fall back to Alpha Vantage `RELIANCE.BSE`
-- Sentiment is normalized and downweighted when coverage is weak.
-- New or untrained stocks enter training mode instead of showing fake predictions.
-
-## Monitoring Artifacts
-
-The latest chart files were generated successfully in `backend/monitoring/reports`.
-
-### Portfolio Charts
-
-- [Combined multi-market monitoring](backend/monitoring/reports/combined_multimarket_monitoring.png)
-- [Multi-market heatmap](backend/monitoring/reports/multimarket_heatmap.png)
-- [Top 10 signal overview](backend/monitoring/reports/top10_signal_overview.png)
-- [Ultimate v5.2 dashboard](backend/monitoring/reports/ultimate_v52_dashboard.png)
-
-### Per-Stock Monitoring Charts
-
-| Stock | Chart | Accuracy | AUC | F1 | p-value | Overfit Risk |
-| --- | --- | ---: | ---: | ---: | ---: | --- |
-| AAPL | [chart](backend/monitoring/reports/AAPL_monitoring.png) | 65.5% | 0.593 | 79.1% | 0.0000 | medium |
-| MSFT | [chart](backend/monitoring/reports/MSFT_monitoring.png) | 47.2% | 0.650 | 0.0% | 0.7965 | high |
-| GOOGL | [chart](backend/monitoring/reports/GOOGL_monitoring.png) | 76.7% | 0.619 | 86.8% | 0.0000 | medium |
-| AMZN | [chart](backend/monitoring/reports/AMZN_monitoring.png) | 62.8% | 0.734 | 77.1% | 0.0004 | medium |
-| NVDA | [chart](backend/monitoring/reports/NVDA_monitoring.png) | 70.4% | 0.549 | 82.6% | 0.0000 | medium |
-| RELIANCE.NS | [chart](backend/monitoring/reports/RELIANCE_NS_monitoring.png) | 52.2% | 0.726 | 0.0% | 0.3773 | medium |
-| TCS.NS | [chart](backend/monitoring/reports/TCS_NS_monitoring.png) | 65.6% | 0.611 | 0.0% | 0.0014 | high |
-| INFY.NS | [chart](backend/monitoring/reports/INFY_NS_monitoring.png) | 56.8% | 0.467 | 71.2% | 0.0413 | high |
-| TSLA | [chart](backend/monitoring/reports/TSLA_monitoring.png) | 50.0% | 0.616 | 0.0% | 0.5300 | high |
-| META | [chart](backend/monitoring/reports/META_monitoring.png) | 57.1% | 0.574 | 69.3% | 0.0325 | medium |
+- Adaptive class weighting for imbalanced labels.
+- Balanced threshold search to reduce one-class prediction collapse.
+- Macro-F1, negative-class F1, actual/predicted class rates, AUC, p-value, fold stability, and calibration sample tracking.
+- Local model registry code with lifecycle stages:
+  - `candidate`
+  - `production`
+  - `quarantined`
+- Promotion gates block statistically weak, unstable, class-collapsed, or poorly calibrated models from being treated as production.
+- Guarded decision engine combines ML probability, validation quality, volatility, market regime, sentiment, and risk.
+- Monitoring reports are generated as JSON and PNG artifacts.
 
 ## Architecture
 
 ```mermaid
 graph TD
-    UI[React prediction dashboard] --> API[Flask API]
-    API --> Resolver[Symbol resolver]
+    UI[React Dashboard] --> API[Flask API]
+    ChatUI[Agentic Chatbot UI] --> ChatAPI[FastAPI Chatbot]
+    ChatAPI --> Agent[Intent + RAG + Agent Tools]
+    Agent --> API
+    Agent --> Engine[Unified Engine v5.2]
+    API --> Resolver[Symbol Resolver]
     Resolver --> TD[Twelve Data]
     Resolver --> FH[Finnhub]
     Resolver --> AV[Alpha Vantage]
-    Resolver --> YF[Yahoo Finance fallback]
-    API --> Engine[Unified Engine v5.2]
-    Engine --> Features[Feature engine]
-    Features --> Models[XGBoost + LightGBM + RandomForest + meta learner]
-    Models --> Calib[Probability calibration]
-    Models --> Quantiles[Quantile price ranges]
-    Calib --> Decision[Guarded decision engine]
+    Resolver --> YF[Yahoo Finance Fallback]
+    API --> Engine
+    Engine --> Features[Feature Engine]
+    Features --> Models[XGBoost + LightGBM + RandomForest + Meta Learner]
+    Models --> Calib[Probability Calibration]
+    Models --> Quantiles[Quantile Forecast Ranges]
+    Calib --> Decision[Guarded Decision Engine]
     Quantiles --> Decision
-    Decision --> Ranges[Range-first frontend forecasts]
-    Engine --> Reports[PNG and JSON monitoring reports]
+    Decision --> UI
+    Engine --> Registry[Local Model Registry + Promotion Gates]
+    Engine --> Reports[Monitoring Reports]
 ```
+
+## Monitoring Artifacts
+
+Portfolio reports:
+
+- [Combined multi-market monitoring](backend/monitoring/reports/combined_multimarket_monitoring.png)
+- [Multi-market heatmap](backend/monitoring/reports/multimarket_heatmap.png)
+- [Top 10 signal overview](backend/monitoring/reports/top10_signal_overview.png)
+- [AI forecasting performance monitor](backend/monitoring/reports/ai_stock_forecasting_performance_monitor.png)
+- [Ultimate v5.2 dashboard](backend/monitoring/reports/ultimate_v52_dashboard.png)
+
+Per-stock reports:
+
+| Stock | Chart |
+| --- | --- |
+| AAPL | [chart](backend/monitoring/reports/AAPL_monitoring.png) |
+| MSFT | [chart](backend/monitoring/reports/MSFT_monitoring.png) |
+| GOOGL | [chart](backend/monitoring/reports/GOOGL_monitoring.png) |
+| AMZN | [chart](backend/monitoring/reports/AMZN_monitoring.png) |
+| NVDA | [chart](backend/monitoring/reports/NVDA_monitoring.png) |
+| RELIANCE.NS | [chart](backend/monitoring/reports/RELIANCE_NS_monitoring.png) |
+| TCS.NS | [chart](backend/monitoring/reports/TCS_NS_monitoring.png) |
+| HDFCBANK.NS | [chart](backend/monitoring/reports/HDFCBANK_NS_monitoring.png) |
+| INFY.NS | [chart](backend/monitoring/reports/INFY_NS_monitoring.png) |
+| ICICIBANK.NS | [chart](backend/monitoring/reports/ICICIBANK_NS_monitoring.png) |
 
 ## Environment Variables
 
 Create `backend/.env`. Do not commit real secrets.
 
-The app supports both singular and plural key variables. The plural variables are preferred because they allow provider key rotation when rate limits are hit.
-
 ```env
-# Flask
 FLASK_ENV=development
 SECRET_KEY=replace-with-a-long-random-secret
 
-# Twelve Data
 TWELVE_DATA_API_KEYS=key1,key2
 TWELVE_DATA_API_KEY=key1
 
-# Alpha Vantage
 ALPHA_VANTAGE_API_KEYS=key1,key2,key3
 ALPHA_VANTAGE_API_KEY=key1
 
-# Finnhub
 FINNHUB_API_KEYS=key1,key2
 FINNHUB_API_KEY=key1
 
-# Optional LLM/chatbot key
 GROQ_API_KEY=your_key
 ```
 
-Current local `.env` check:
+Plural key variables are preferred because the backend can rotate provider keys when rate limits are hit.
 
-- `TWELVE_DATA_API_KEYS`: present, 2 keys, no duplicates detected.
-- `ALPHA_VANTAGE_API_KEYS`: present, 3 keys, no duplicates detected.
-- `FINNHUB_API_KEYS`: present, 2 keys, no duplicates detected.
-- Singular fallback keys are also present.
-- `SECRET_KEY` was not found and should be added for production.
+## Local Setup
 
-## Setup
-
-### Backend
+Backend API:
 
 ```bash
 cd backend
@@ -157,13 +164,14 @@ pip install -r requirements.txt
 python app.py
 ```
 
-Backend default local URL:
+Chatbot service:
 
-```text
-http://localhost:8000
+```bash
+cd backend/chatbot/app
+python main.py
 ```
 
-### Frontend
+Frontend:
 
 ```bash
 cd frontend
@@ -171,71 +179,93 @@ npm install
 npm start
 ```
 
-Frontend default local URL:
+Default local URLs:
 
 ```text
-http://localhost:3000
+Frontend: http://localhost:3000
+Backend:  http://localhost:8000
+Chatbot:  http://localhost:8001
 ```
 
 ## Training And Evaluation
 
-Retrain the configured 10-stock portfolio:
+Retrain the configured portfolio:
 
 ```bash
 cd backend
 python train_top5_monitor.py
 ```
 
-Evaluate the latest trained models and save signal reports:
+Evaluate latest trained models:
 
 ```bash
 cd backend
 python evaluate_top10_models.py
 ```
 
-Run backend tests:
+Generate monitoring dashboard:
 
 ```bash
-python -m pytest backend/tests -q
+cd backend
+python create_ultimate_dashboard.py
 ```
 
-Build the frontend:
+Inspect model registry endpoints:
+
+```text
+GET /api/mlops/registry
+GET /api/mlops/registry/AAPL
+```
+
+## Verification
+
+Recent checks:
 
 ```bash
+python -m py_compile backend/app.py backend/unified_engine/monitoring.py
+python -m py_compile backend/chatbot/app/config.py backend/chatbot/app/main.py backend/chatbot/app/core/agent.py backend/chatbot/app/tools/prediction_tools.py
+python -m unittest backend.tests.test_decision_engine backend.tests.test_sentiment_helpers backend.tests.test_training_quality backend.tests.test_model_registry
 cd frontend
 npm run build
 ```
 
 ## Forecast Display Contract
 
-The UI is intentionally range-first:
+- No fake exact target is shown when a model is not ready.
+- Forecast tables show ranges instead of pretending certainty.
+- New or unsupported stocks show training, retry, or unavailable states.
+- Reliability monitoring starts only after enough predictions mature.
+- Weak models are held, downweighted, or quarantined instead of forced into BUY/SELL.
 
-- No exact price target is shown in the Forecast Signals table.
-- Forecast rows show 10th to 90th percentile price range.
-- Move range and move percent range are computed from the current price.
-- Charts may use the model midpoint internally for drawing continuity, but visible tooltips and tables show ranges.
-- If a model is not ready, the app shows training mode and does not display fake forecast prices.
+## Deployment Notes
+
+Hugging Face Spaces supports Docker deployment for this app, but it does not provide direct Kubernetes control inside a Space. For production-scale deployment, use Kubernetes on AWS, GCP, Azure, or a VPS-backed cluster.
+
+Recommended deployment path:
+
+- Hugging Face Docker Space for public demo.
+- Kubernetes for production:
+  - frontend service
+  - backend API service
+  - chatbot service
+  - training worker
+  - Redis queue
+  - Postgres
+  - MLflow or model registry
+  - Prometheus/Grafana monitoring
 
 ## Known Limitations
 
-- Finnhub blocks some `.NS` Indian stock sentiment/news endpoints with `403` on the current key plan. The decision engine treats this as low-confidence or neutral sentiment instead of forcing sentiment.
-- Some models are intentionally conservative because overfit risk is high. This is expected behavior, not a UI bug.
-- Alpha Vantage free plans may rate-limit quickly and may not allow `outputsize=full` for some symbols. Multiple keys help, but provider plan limits can still apply.
+- Market data provider limits can affect first-time symbols.
+- Some Indian-stock news/sentiment endpoints may be unavailable on free API plans.
+- Long training jobs are better suited to workers or scheduled jobs than request-time execution.
+- Uploaded images are accepted as chat context, but full visual chart interpretation requires adding a vision model.
 
-## Verification Snapshot
+## Next MLOps Upgrades
 
-Recently verified:
-
-```text
-python -m py_compile backend/app.py backend/stock_api.py backend/unified_engine/inference.py
-python -m pytest backend/tests -q
-npm run build
-```
-
-Live endpoint range checks:
-
-```text
-AAPL    ready=True   ranges=7/7   invalid_ranges=0
-TCS.NS  ready=True   ranges=7/7   invalid_ranges=0
-IBM     ready=False  training mode, no fake forecast shown
-```
+- Scheduled retraining with promotion-only deployment.
+- Shadow model deployment before production promotion.
+- Feature, prediction, and realized-return drift alerts.
+- Backtesting with transaction costs, slippage, Sharpe ratio, max drawdown, profit factor, and turnover.
+- Data contracts for OHLCV schema, currency, timezone, exchange suffix, and missing data.
+- CI checks that fail when artifacts lack quality-gate metadata.

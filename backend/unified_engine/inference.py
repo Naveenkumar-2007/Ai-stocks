@@ -261,6 +261,17 @@ def _run_inference(ticker, artifact, hist, current_price, days):
 
     # === STEP 8: Build response ===
     metrics = artifact.get("metrics", {})
+    lifecycle_stage = artifact.get("lifecycle_stage")
+    promotion = artifact.get("promotion")
+    if not lifecycle_stage:
+        try:
+            from unified_engine.model_registry import get_latest_or_production_record
+            registry_record = get_latest_or_production_record(ticker)
+            if registry_record:
+                lifecycle_stage = registry_record.get("stage")
+                promotion = registry_record.get("promotion")
+        except Exception:
+            lifecycle_stage = None
 
     return {
         "ticker": ticker,
@@ -288,6 +299,8 @@ def _run_inference(ticker, artifact, hist, current_price, days):
         "drift_score": 0.0,
         "prediction_horizon": trained_horizon,
         "metrics": metrics,
+        "lifecycle_stage": lifecycle_stage or "unregistered",
+        "promotion": promotion or {},
         "components": {
             "xgb_prob": float(xgb_prob),
             "lgbm_mag": float(lgbm_mag),

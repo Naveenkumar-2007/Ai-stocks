@@ -15,11 +15,19 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
+import logging
+
+APP_DIR = Path(__file__).resolve().parent
+if str(APP_DIR) in sys.path:
+    sys.path.remove(str(APP_DIR))
+sys.path.insert(0, str(APP_DIR))
+if "models" in sys.modules and not hasattr(sys.modules["models"], "__path__"):
+    del sys.modules["models"]
+
 from models.schemas import ChatRequest, ChatResponse, ChatSession, ChatMessage
 from core.agent import agent
 from core.learning import save_feedback, get_feedback_stats
 from config import settings
-import logging
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -180,7 +188,12 @@ async def chat(request: ChatRequest):
 
         history = request.history if request.history else session.messages[-10:]
 
-        result = await agent.chat(request.message, history)
+        result = await agent.chat(
+            request.message,
+            history,
+            image_data=request.image_data,
+            image_mime=request.image_mime,
+        )
 
         session.messages.append(ChatMessage(role="user", content=request.message))
         session.messages.append(ChatMessage(role="assistant", content=result.reply))

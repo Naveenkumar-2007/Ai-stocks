@@ -1,7 +1,7 @@
 # app/config.py
 from pydantic_settings import BaseSettings
+from pydantic import field_validator
 from functools import lru_cache
-from typing import List
 import os
 
 class Settings(BaseSettings):
@@ -13,6 +13,20 @@ class Settings(BaseSettings):
     app_name: str = "StockRAG Bot"
     debug: bool = True
     version: str = "1.0.0"
+
+    @field_validator("debug", mode="before")
+    @classmethod
+    def parse_debug_flag(cls, value):
+        if isinstance(value, bool):
+            return value
+        if value is None:
+            return False
+        normalized = str(value).strip().lower()
+        if normalized in {"1", "true", "yes", "y", "on", "dev", "development", "debug"}:
+            return True
+        if normalized in {"0", "false", "no", "n", "off", "prod", "production", "release"}:
+            return False
+        return False
     
     # LLM Configuration
     llm_model: str = "llama-3.3-70b-versatile" 

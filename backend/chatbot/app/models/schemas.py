@@ -127,6 +127,8 @@ class ChatRequest(BaseModel):
     message: str
     history: List[ChatMessage] = []
     chat_id: Optional[str] = None  # For persistent memory
+    image_data: Optional[str] = None
+    image_mime: Optional[str] = None
 
 
 class ChatResponse(BaseModel):

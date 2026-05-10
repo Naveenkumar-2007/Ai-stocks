@@ -458,7 +458,9 @@ def _build_user_trust_payload(recommendation, v2_payload, model_health, market_r
 
     reasons = []
     if health_accuracy is None:
-        reasons.append('Not enough evaluated predictions yet')
+        evaluated_count = int(model_health.get('evaluated_count') or 0)
+        min_evaluations = int(model_health.get('min_evaluations') or 5)
+        reasons.append(f'Reliability monitoring is warming up: {evaluated_count}/{min_evaluations} completed forecast evaluations')
     if drift_score >= 0.35:
         reasons.append('Feature drift is elevated')
     if market_regime.get('tone') == 'warning':
@@ -1215,6 +1217,50 @@ def mlops_status():
         'mlflow_tracking_uri': os.getenv('MLFLOW_TRACKING_URI', 'sqlite:///mlflow.db'),
         'timestamp': datetime.now().isoformat()
     })
+
+
+@app.route('/api/mlops/registry')
+def mlops_unified_registry():
+    """Return latest Unified Engine registry records and promotion status."""
+    try:
+        from unified_engine.model_registry import list_model_records
+
+        latest = {}
+        for record in list_model_records():
+            ticker = record.get('ticker')
+            if ticker and ticker not in latest:
+                latest[ticker] = record
+        return jsonify({
+            'success': True,
+            'count': len(latest),
+            'models': list(latest.values()),
+            'timestamp': datetime.now().isoformat()
+        })
+    except Exception as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 500
+
+
+@app.route('/api/mlops/registry/<ticker>')
+def mlops_unified_registry_ticker(ticker):
+    """Return the production or latest registry record for one ticker."""
+    try:
+        from unified_engine.model_registry import get_latest_or_production_record
+
+        record = get_latest_or_production_record(ticker)
+        if not record:
+            return jsonify({
+                'success': False,
+                'ticker': ticker.upper(),
+                'error': 'No registered Unified Engine model found for this ticker.'
+            }), 404
+        return jsonify({
+            'success': True,
+            'ticker': ticker.upper(),
+            'model': record,
+            'timestamp': datetime.now().isoformat()
+        })
+    except Exception as exc:
+        return jsonify({'success': False, 'ticker': ticker.upper(), 'error': str(exc)}), 500
 
 
 @app.route('/api/model-status/<ticker>')
