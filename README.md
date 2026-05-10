@@ -1,6 +1,6 @@
 ---
 title: AI Stock Predictor
-emoji: chart_with_upwards_trend
+emoji: 📈
 colorFrom: blue
 colorTo: green
 sdk: docker
