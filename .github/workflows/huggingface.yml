@@ -12,7 +12,18 @@ jobs:
         with:
           fetch-depth: 0
           lfs: true
+      - name: Ensure Git LFS is available
+        run: |
+          git lfs install
+          git lfs pull
       - name: Push to hub
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
-        run: git push https://Naveen-2007:$HF_TOKEN@huggingface.co/spaces/Naveen-2007/ai-stock-predictor main --force
+        run: |
+          if [ -z "$HF_TOKEN" ]; then
+            echo "HF_TOKEN GitHub secret is missing."
+            exit 1
+          fi
+          git remote add space https://Naveen-2007:$HF_TOKEN@huggingface.co/spaces/Naveen-2007/ai-stock-predictor
+          git lfs push --all space main
+          git push space main --force

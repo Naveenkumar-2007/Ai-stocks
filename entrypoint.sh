@@ -1,10 +1,8 @@
 #!/bin/bash
-# Do NOT use set -e — we want Gunicorn to start even if chatbot fails
+# Keep the main app alive even if optional side services cannot start.
 
-echo "🔧 Injecting runtime environment variables into React build..."
+echo "Injecting runtime environment variables into React build..."
 
-# Replace placeholder values in all JS files in the React build
-# This allows HF Spaces secrets (available only at runtime) to be used by React
 for file in $(find /app/build/static/js -name '*.js' 2>/dev/null); do
   sed -i "s|__REACT_APP_FIREBASE_API_KEY__|${REACT_APP_FIREBASE_API_KEY:-}|g" "$file"
   sed -i "s|__REACT_APP_FIREBASE_AUTH_DOMAIN__|${REACT_APP_FIREBASE_AUTH_DOMAIN:-}|g" "$file"
@@ -17,54 +15,43 @@ for file in $(find /app/build/static/js -name '*.js' 2>/dev/null); do
   sed -i "s|__REACT_APP_API_URL__|${REACT_APP_API_URL:-}|g" "$file"
 done
 
-echo "✅ Environment variables injected successfully"
+echo "Runtime environment injection complete."
 
-# Log key presence only (never print secret values)
 if [ -n "${GROQ_API_KEY:-}" ]; then
-  echo "🔑 GROQ_API_KEY: SET (length=${#GROQ_API_KEY})"
+  echo "GROQ_API_KEY: set"
 else
-  echo "🔑 GROQ_API_KEY: NOT SET"
+  echo "GROQ_API_KEY: not set"
 fi
 
-if [ -n "${FINNHUB_API_KEY:-}" ]; then
-  echo "🔑 FINNHUB_API_KEY: SET"
+if [ -n "${FINNHUB_API_KEY:-}" ] || [ -n "${FINNHUB_API_KEYS:-}" ]; then
+  echo "Finnhub API key: set"
 else
-  echo "🔑 FINNHUB_API_KEY: NOT SET"
+  echo "Finnhub API key: not set; market data fallbacks will be used"
 fi
 
-if [ -n "${FINNHUB_API_KEYS:-}" ]; then
-  echo "🔑 FINNHUB_API_KEYS: SET"
-else
-  echo "🔑 FINNHUB_API_KEYS: NOT SET"
-fi
-
-# Start the chatbot FastAPI server in the background on port 8001
-echo "🤖 Starting chatbot server on port 8001..."
+echo "Starting chatbot server on 127.0.0.1:8001..."
 cd /app/chatbot/app
 env PYTHONPATH="/app/chatbot/app:/app:${PYTHONPATH:-}" python -m uvicorn main:app --host 127.0.0.1 --port 8001 --workers 1 --log-level info 2>&1 &
 CHATBOT_PID=$!
 cd /app
 
-# Wait for chatbot to initialize (it loads ML models, may take a few seconds)
-echo "⏳ Waiting for chatbot to initialize..."
+echo "Waiting briefly for chatbot startup..."
 for i in $(seq 1 10); do
   if curl -s http://127.0.0.1:8001/ > /dev/null 2>&1; then
-    echo "✅ Chatbot server is ready (PID: $CHATBOT_PID)"
+    echo "Chatbot server is ready."
     break
   fi
-  if ! kill -0 $CHATBOT_PID 2>/dev/null; then
-    echo "⚠️ Chatbot server process exited — continuing without it"
+  if ! kill -0 "$CHATBOT_PID" 2>/dev/null; then
+    echo "Chatbot server exited; the main prediction app will still start."
     break
   fi
   sleep 2
 done
 
-# Start Prometheus Agent if Grafana Cloud secrets are present
 REMOTE_WRITE_URL="${GRAFANA_REMOTE_WRITE_URL:-${PROM_REMOTE_WRITE_URL:-${GRAFANA_URL:-}}}"
 
 if [ -n "${REMOTE_WRITE_URL:-}" ] && [ -n "${GRAFANA_USER:-}" ] && [ -n "${GRAFANA_TOKEN:-}" ]; then
-  echo "📊 Setting up Prometheus remote write to Grafana Cloud..."
-  
+  echo "Configuring Prometheus remote write."
   cat <<EOF > /app/prometheus.yml
 global:
   scrape_interval: 15s
@@ -80,17 +67,10 @@ remote_write:
       username: "${GRAFANA_USER}"
       password: "${GRAFANA_TOKEN}"
 EOF
-
-  echo "🚀 Starting Prometheus agent in background..."
-  # Run in agent mode to save memory (forwards data directly, doesn't store locally)
   prometheus --config.file=/app/prometheus.yml --storage.agent.path=/app/data-agent --enable-feature=agent &
-  PROMETHEUS_PID=$!
 else
-  echo "⚠️ Remote write URL, GRAFANA_USER, or GRAFANA_TOKEN not set. Skipping Prometheus agent."
+  echo "Grafana remote write secrets not set; skipping Prometheus agent."
 fi
 
-# Start Gunicorn (main Flask app)
-# Use --preload so the scheduler starts ONCE in the master process before forking workers.
-# Use 1 worker to prevent duplicate scheduler threads.
-echo "🚀 Starting Gunicorn on port 7860 (single worker + preload for scheduler)..."
+echo "Starting Gunicorn on 0.0.0.0:7860..."
 exec gunicorn --bind 0.0.0.0:7860 --timeout 300 --workers 1 --preload app:app

@@ -1,0 +1,37 @@
+.git
+.github
+.pytest_cache
+.benchmarks
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.log
+
+# Local secrets and runtime state
+.env
+backend/.env
+frontend/.env
+logs/
+cache/
+backend/logs/
+backend/cache/
+backend/.pytest_cache/
+backend/.benchmarks/
+backend/mlruns/
+backend/data-agent/
+backend/prometheus.yml
+
+# Frontend build/dependency output is rebuilt inside Docker
+frontend/node_modules/
+frontend/build/
+backend/build/
+
+# Local databases are runtime artifacts, not Docker image inputs
+*.db
+backend/*.db
+
+# Development-only deployment/monitoring stacks
+monitoring/grafana/
+monitoring/prometheus/
+monitoring/docker-compose.yml

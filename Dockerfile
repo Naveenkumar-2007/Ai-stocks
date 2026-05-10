@@ -2,7 +2,7 @@
 FROM node:20-alpine AS frontend-builder
 WORKDIR /frontend
 COPY frontend/package*.json ./
-RUN npm install
+RUN npm ci --no-audit --no-fund
 COPY frontend/ ./
 # Build with placeholder values - they will be replaced at runtime
 ENV REACT_APP_FIREBASE_API_KEY=__REACT_APP_FIREBASE_API_KEY__
@@ -20,7 +20,8 @@ RUN npm run build
 FROM python:3.10-slim
 WORKDIR /app
 
-# Install system dependencies and Prometheus
+# Install system dependencies. Prometheus is optional and downloaded as a small
+# single binary so the demo Space can still export metrics to Grafana Cloud.
 RUN apt-get update && apt-get install -y \
     build-essential \
     curl \
@@ -31,9 +32,13 @@ RUN apt-get update && apt-get install -y \
     cp prometheus-2.54.1.linux-amd64/prometheus /usr/local/bin/ && \
     rm -rf prometheus-*
 
-# Copy backend requirements and install
-COPY backend/requirements.txt ./
-RUN pip3 install --no-cache-dir -r requirements.txt
+# Copy Hugging Face runtime requirements and install. The full
+# backend/requirements.txt keeps heavyweight local MLOps tools such as Airflow,
+# Feast, Evidently, and MLflow for development, but they are not needed to boot
+# the public Space.
+COPY backend/requirements-space.txt ./requirements.txt
+RUN pip3 install --no-cache-dir --upgrade pip && \
+    pip3 install --no-cache-dir -r requirements.txt
 
 # Copy backend code
 COPY backend/ ./
