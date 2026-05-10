@@ -13,6 +13,12 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def _money(value: float, symbol: str) -> str:
+    upper_symbol = (symbol or "").upper()
+    prefix = "₹" if upper_symbol.endswith((".NS", ".BO")) else "$"
+    return f"{prefix}{value:.2f}"
+
+
 class TechnicalTools:
     @staticmethod
     async def get_indicators(symbol: str) -> List[TechnicalIndicator]:
@@ -133,10 +139,10 @@ class TechnicalTools:
                 bb_width = ((upper_band - lower_band) / middle_band) * 100
                 if current_price >= upper_band:
                     bb_signal = "overbought"
-                    bb_desc = f"price at/above upper band (${upper_band:.2f}) — overbought, potential reversal"
+                    bb_desc = f"price at/above upper band ({_money(upper_band, symbol)}) — overbought, potential reversal"
                 elif current_price <= lower_band:
                     bb_signal = "oversold"
-                    bb_desc = f"price at/below lower band (${lower_band:.2f}) — oversold, potential bounce"
+                    bb_desc = f"price at/below lower band ({_money(lower_band, symbol)}) — oversold, potential bounce"
                 elif current_price > middle_band:
                     bb_signal = "buy"
                     bb_desc = f"price between middle and upper band — bullish zone"
@@ -148,7 +154,7 @@ class TechnicalTools:
                     name="Bollinger Bands(20,2)",
                     value=float(round(bb_width, 2)),
                     signal=bb_signal,
-                    description=f"Upper: ${upper_band:.2f} | Mid: ${middle_band:.2f} | Lower: ${lower_band:.2f} — {bb_desc}. Band width: {bb_width:.1f}%."
+                    description=f"Upper: {_money(upper_band, symbol)} | Mid: {_money(middle_band, symbol)} | Lower: {_money(lower_band, symbol)} — {bb_desc}. Band width: {bb_width:.1f}%."
                 ))
 
             # ── 6. Stochastic Oscillator (14, 3) ─────────────────
@@ -245,7 +251,7 @@ class TechnicalTools:
                         name="VWAP",
                         value=float(round(current_vwap, 2)),
                         signal=vwap_signal,
-                        description=f"Price is {abs(vwap_pct):.1f}% {'above' if vwap_signal == 'buy' else 'below'} VWAP (${current_vwap:.2f}) — {'trading above' if vwap_signal == 'buy' else 'trading below'} institutional fair value."
+                        description=f"Price is {abs(vwap_pct):.1f}% {'above' if vwap_signal == 'buy' else 'below'} VWAP ({_money(current_vwap, symbol)}) — {'trading above' if vwap_signal == 'buy' else 'trading below'} institutional fair value."
                     ))
 
             # ── Summary Signal ────────────────────────────────────

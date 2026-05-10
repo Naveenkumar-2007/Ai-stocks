@@ -122,12 +122,13 @@ const CandlestickShape = ({ fill, x, y, width, height, low, high, open, close })
 // Custom Tooltip Component with better mobile display
 const CustomTooltip = ({ active, payload, label }) => {
   if (active && payload && payload.length) {
+    const currency = payload[0]?.payload?.currency || payload[0]?.payload?.stockCurrency || 'USD';
     return (
       <div className="bg-white dark:bg-dark-card p-2 sm:p-3 border border-gray-200 dark:border-dark-border rounded-lg shadow-xl text-xs sm:text-sm max-w-[200px]">
         <p className="font-semibold text-gray-900 dark:text-white mb-1 truncate">{label}</p>
         {payload.map((entry, index) => (
           <p key={index} className="font-medium truncate" style={{ color: entry.color }}>
-            {entry.name}: ${typeof entry.value === 'number' ? entry.value.toFixed(2) : entry.value}
+            {entry.name}: {typeof entry.value === 'number' ? formatMoney(entry.value, currency) : entry.value}
           </p>
         ))}
       </div>
@@ -152,15 +153,16 @@ const formatTimeAgo = (timestamp) => {
 const CandlestickTooltip = ({ active, payload }) => {
   if (active && payload && payload.length > 0) {
     const data = payload[0].payload;
+    const currency = data.currency || data.stockCurrency || 'USD';
     return (
       <div className="bg-white dark:bg-dark-card p-2 sm:p-3 border border-gray-200 dark:border-dark-border rounded-lg shadow-lg text-xs sm:text-sm">
         <p className="font-medium text-gray-600 dark:text-gray-400 mb-1">
           {new Date(data.date).toLocaleDateString()}
         </p>
-        <p className="text-green-600 dark:text-green-400">Open: ${data.open?.toFixed(2)}</p>
-        <p className="text-blue-600 dark:text-blue-400">High: ${data.high?.toFixed(2)}</p>
-        <p className="text-orange-600 dark:text-orange-400">Low: ${data.low?.toFixed(2)}</p>
-        <p className="text-red-600 dark:text-red-400">Close: ${data.close?.toFixed(2)}</p>
+        <p className="text-green-600 dark:text-green-400">Open: {formatMoney(data.open, currency)}</p>
+        <p className="text-blue-600 dark:text-blue-400">High: {formatMoney(data.high, currency)}</p>
+        <p className="text-orange-600 dark:text-orange-400">Low: {formatMoney(data.low, currency)}</p>
+        <p className="text-red-600 dark:text-red-400">Close: {formatMoney(data.close, currency)}</p>
         <p className="text-gray-600 dark:text-gray-400">Vol: {formatVolume(data.volume)}</p>
       </div>
     );
@@ -2872,7 +2874,7 @@ function Prediction() {
                   <DollarSign className="w-3 h-3 sm:w-4 sm:h-4" />
                   <span className="truncate">Current Price</span>
                 </p>
-                <p className="text-xl sm:text-2xl lg:text-3xl font-bold text-gray-900 dark:text-white mt-1">${stockData.current_price}</p>
+                <p className="text-xl sm:text-2xl lg:text-3xl font-bold text-gray-900 dark:text-white mt-1">{formatMoney(stockData.current_price, stockData.currency)}</p>
                 <p className={`text-xs sm:text-sm mt-1 sm:mt-2 font-semibold ${stockData.day_change >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
                   {stockData.day_change >= 0 ? '+' : ''}{stockData.day_change.toFixed(2)} ({stockData.day_change_percent.toFixed(2)}%)
                 </p>

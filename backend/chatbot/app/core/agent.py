@@ -425,6 +425,15 @@ class StockAgent:
                 logger.info(f"✅ Matched company '{company}' → {ticker}")
                 return ticker
 
+        suffix_matches = re.findall(r'\b[A-Z0-9]{1,15}\.[A-Z]{1,3}\b', query.upper())
+        if suffix_matches:
+            logger.info(f"Matched suffixed ticker: {suffix_matches[0]}")
+            return suffix_matches[0]
+
+        crypto_matches = re.findall(r'\b[A-Z]{2,5}-USD\b', query.upper())
+        if crypto_matches:
+            return crypto_matches[0]
+
         # 2. $SYMBOL pattern
         dollar_match = re.search(r'\$([A-Z]{1,5})\b', query)
         if dollar_match:

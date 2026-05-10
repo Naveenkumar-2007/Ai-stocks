@@ -27,6 +27,25 @@ from models.prompts import SYSTEM_PROMPT, ANALYSIS_PROMPT, GENERAL_FINANCE_PROMP
 logger = logging.getLogger(__name__)
 
 
+def _currency_symbol(currency: str = "", symbol: str = "") -> str:
+    code = (currency or "").upper()
+    if not code:
+        upper_symbol = (symbol or "").upper()
+        code = "INR" if upper_symbol.endswith((".NS", ".BO")) else "USD"
+    return {
+        "USD": "$",
+        "INR": "₹",
+        "EUR": "€",
+        "GBP": "£",
+        "JPY": "¥",
+        "CAD": "CA$",
+        "AUD": "A$",
+        "HKD": "HK$",
+        "CNY": "¥",
+        "SGD": "S$",
+    }.get(code, f"{code} ")
+
+
 class HybridRAGPipeline:
     def __init__(self):
         self.llm = ChatGroq(
@@ -333,7 +352,8 @@ class HybridRAGPipeline:
         # ── Company Info ──
         if context.company_profile:
             cp = context.company_profile
-            mkt_cap_str = f"${cp.market_cap / 1000:.1f}B" if cp.market_cap > 1000 else f"${cp.market_cap:.0f}M"
+            money = _currency_symbol(cp.currency, symbol)
+            mkt_cap_str = f"{money}{cp.market_cap / 1000:.1f}B" if cp.market_cap > 1000 else f"{money}{cp.market_cap:.0f}M"
             result["company_info"] = (
                 f"Name: {cp.name}\n"
                 f"  Sector: {cp.sector} | Exchange: {cp.exchange}\n"
@@ -349,10 +369,12 @@ class HybridRAGPipeline:
         if context.stock_data:
             sd = context.stock_data
             direction = "▲" if sd.change >= 0 else "▼"
+            profile_currency = context.company_profile.currency if context.company_profile else ""
+            money = _currency_symbol(profile_currency, symbol)
             result["price_data"] = (
-                f"Current: ${sd.current_price:.2f} ({direction} {abs(sd.percent_change):.2f}%)\n"
-                f"  Open: ${sd.open:.2f} | High: ${sd.high:.2f} | Low: ${sd.low:.2f}\n"
-                f"  Previous Close: ${sd.previous_close:.2f}"
+                f"Current: {money}{sd.current_price:.2f} ({direction} {abs(sd.percent_change):.2f}%)\n"
+                f"  Open: {money}{sd.open:.2f} | High: {money}{sd.high:.2f} | Low: {money}{sd.low:.2f}\n"
+                f"  Previous Close: {money}{sd.previous_close:.2f}"
             )
         else:
             result["price_data"] = f"Live price data not available for {symbol}."
@@ -360,6 +382,8 @@ class HybridRAGPipeline:
         # ── Fundamentals ──
         if context.fundamentals:
             fd = context.fundamentals
+            profile_currency = context.company_profile.currency if context.company_profile else ""
+            money = _currency_symbol(profile_currency, symbol)
             lines = []
             if fd.pe_ratio is not None:
                 pe_label = "Growth/Expensive" if fd.pe_ratio > 30 else ("Moderate" if fd.pe_ratio > 15 else "Value/Undervalued")
@@ -369,7 +393,7 @@ class HybridRAGPipeline:
             if fd.ps_ratio is not None:
                 lines.append(f"• P/S Ratio: {fd.ps_ratio:.2f}")
             if fd.eps_ttm is not None:
-                lines.append(f"• EPS (TTM): ${fd.eps_ttm:.2f}")
+                lines.append(f"• EPS (TTM): {money}{fd.eps_ttm:.2f}")
             if fd.roe is not None:
                 roe_label = "Strong" if fd.roe > 15 else ("Moderate" if fd.roe > 8 else "Weak")
                 lines.append(f"• ROE: {fd.roe:.1f}% ({roe_label} profitability)")
@@ -379,7 +403,7 @@ class HybridRAGPipeline:
                 beta_label = "High Volatility" if fd.beta > 1.5 else ("Market Average" if fd.beta > 0.8 else "Defensive/Low Vol")
                 lines.append(f"• Beta: {fd.beta:.2f} ({beta_label})")
             if fd.week_52_high is not None and fd.week_52_low is not None:
-                lines.append(f"• 52-Week Range: ${fd.week_52_low:.2f} — ${fd.week_52_high:.2f}")
+                lines.append(f"• 52-Week Range: {money}{fd.week_52_low:.2f} — {money}{fd.week_52_high:.2f}")
             if fd.current_ratio is not None:
                 health = "Healthy" if fd.current_ratio > 1.5 else ("Adequate" if fd.current_ratio > 1.0 else "⚠️ Liquidity Concern")
                 lines.append(f"• Current Ratio: {fd.current_ratio:.2f} ({health})")

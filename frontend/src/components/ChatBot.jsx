@@ -262,7 +262,7 @@ const ChatBot = () => {
     const formatPredictionReply = (data) => {
         const ticker = data?.ticker || data?.requested_ticker || 'the stock';
         const currency = data?.currency || 'USD';
-        const symbol = currency === 'INR' ? 'Rs ' : currency === 'GBP' ? 'GBP ' : currency === 'JPY' ? 'JPY ' : currency === 'EUR' ? 'EUR ' : '$';
+        const symbol = currency === 'INR' ? '\u20b9' : currency === 'GBP' ? '\u00a3' : currency === 'JPY' ? '\u00a5' : currency === 'EUR' ? '\u20ac' : '$';
         const current = Number(data?.current_price);
         const predicted = Number(data?.predicted_price);
         const ready = Boolean(data?.prediction_ready);
@@ -316,7 +316,8 @@ const ChatBot = () => {
             const requestedSymbols = extractPredictionSymbols(txt);
             const forecastDays = extractForecastDays(txt);
             const shouldCompare = (wantsWatchlist(txt) || requestedSymbols.length > 1) && (wantsPrediction(txt) || wantsAgentAction(txt) || wantsWatchlist(txt));
-            const predictionSymbol = pendingPredictionRequest || wantsPrediction(txt) || wantsAgentAction(txt) ? extractPredictionSymbol(txt) : null;
+            const shouldHandlePrediction = pendingPredictionRequest || wantsPrediction(txt) || wantsAgentAction(txt);
+            const predictionSymbol = shouldHandlePrediction ? extractPredictionSymbol(txt) : null;
 
             if (shouldCompare) {
                 const symbols = requestedSymbols.length > 1 ? requestedSymbols : [];
@@ -341,7 +342,7 @@ const ChatBot = () => {
             if (pendingPredictionRequest && predictionSymbol) {
                 setPendingPredictionRequest(false);
             }
-            if ((wantsPrediction(txt) || wantsAgentAction(txt) || pendingPredictionRequest) && predictionSymbol && !attachedImage) {
+            if (shouldHandlePrediction && predictionSymbol && !attachedImage) {
                 const navigated = runPredictionDesk(predictionSymbol, forecastDays);
                 if (navigated) {
                     setMessages(p => [...p, {
