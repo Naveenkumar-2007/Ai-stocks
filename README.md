@@ -80,6 +80,12 @@ The decision engine is intentionally conservative. Weak validation, class imbala
 - Promotion gates block statistically weak, unstable, class-collapsed, or poorly calibrated models from being treated as production.
 - Guarded decision engine combines ML probability, validation quality, volatility, market regime, sentiment, and risk.
 - Monitoring reports are generated as JSON and PNG artifacts.
+- Lightweight production MLOps layer for Hugging Face/free hosting:
+  - append-only event stream in `backend/monitoring/events`,
+  - served prediction audit log in `backend/monitoring/predictions`,
+  - OHLCV data-quality checks before inference,
+  - return/volume drift monitoring,
+  - single API dashboard for model, inference, and event health.
 
 ## Architecture
 
@@ -104,6 +110,9 @@ graph TD
     Quantiles --> Decision
     Decision --> UI
     Engine --> Registry[Local Model Registry + Promotion Gates]
+    Engine --> Events[Local Event Bus]
+    Engine --> Quality[Data Quality + Drift]
+    Events --> Dashboard[MLOps Dashboard API]
     Engine --> Reports[Monitoring Reports]
 ```
 
@@ -215,16 +224,40 @@ Inspect model registry endpoints:
 ```text
 GET /api/mlops/registry
 GET /api/mlops/registry/AAPL
+GET /api/mlops/dashboard
+GET /api/mlops/dashboard?ticker=AAPL
+GET /api/mlops/events
+GET /api/mlops/predictions
+GET /api/health/training
+POST /api/models/train
 ```
+
+Daily scheduler controls:
+
+```env
+DAILY_TRAIN_TIME_UTC=22:30
+TRAIN_WEEKDAYS_ONLY=true
+ENABLE_STARTUP_CATCHUP=false
+SCHEDULER_TRAIN_BATCH_SIZE=20
+SCHEDULER_BATCH_SLEEP_SECONDS=10
+```
+
+The scheduler writes its latest run summary to:
+
+```text
+backend/monitoring/reports/daily_training_summary.json
+```
+
+It also publishes MLOps events such as `daily_training_started`, `ticker_training_completed`, `ticker_training_failed`, and `daily_training_completed`.
 
 ## Verification
 
 Recent checks:
 
 ```bash
-python -m py_compile backend/app.py backend/unified_engine/monitoring.py
+python -m py_compile backend/app.py backend/scheduler.py backend/unified_engine/monitoring.py backend/unified_engine/event_bus.py backend/unified_engine/data_quality.py backend/unified_engine/drift_monitor.py backend/unified_engine/prediction_store.py backend/unified_engine/mlops_dashboard.py
 python -m py_compile backend/chatbot/app/config.py backend/chatbot/app/main.py backend/chatbot/app/core/agent.py backend/chatbot/app/tools/prediction_tools.py
-python -m unittest backend.tests.test_decision_engine backend.tests.test_sentiment_helpers backend.tests.test_training_quality backend.tests.test_model_registry
+python -m unittest backend.tests.test_decision_engine backend.tests.test_sentiment_helpers backend.tests.test_training_quality backend.tests.test_model_registry backend.tests.test_lightweight_mlops
 cd frontend
 npm run build
 ```
@@ -260,12 +293,15 @@ Recommended deployment path:
 - Some Indian-stock news/sentiment endpoints may be unavailable on free API plans.
 - Long training jobs are better suited to workers or scheduled jobs than request-time execution.
 - Uploaded images are accepted as chat context, but full visual chart interpretation requires adding a vision model.
+- Hugging Face Spaces can run this file-backed MLOps layer, but it does not run a real Kafka cluster, Redis cluster, load balancer, or Kubernetes control plane inside the Space.
 
 ## Next MLOps Upgrades
 
 - Scheduled retraining with promotion-only deployment.
 - Shadow model deployment before production promotion.
-- Feature, prediction, and realized-return drift alerts.
+- Realized-return evaluation jobs that close the loop on stored predictions.
+- Alert rules on the local event stream for data-quality failure, model drift, and training failures.
+- Optional Redpanda/Kafka + Redis Queue deployment when moving from Hugging Face demo to a VPS or Kubernetes cluster.
 - Backtesting with transaction costs, slippage, Sharpe ratio, max drawdown, profit factor, and turnover.
 - Data contracts for OHLCV schema, currency, timezone, exchange suffix, and missing data.
 - CI checks that fail when artifacts lack quality-gate metadata.

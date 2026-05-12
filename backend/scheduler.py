@@ -9,6 +9,8 @@ import threading
 import logging
 import sys
 import os
+import json
+from pathlib import Path
 from datetime import datetime
 
 logging.basicConfig(
@@ -44,8 +46,32 @@ class ModelTrainingScheduler:
         # Keep deployment cold starts responsive. Scheduled training still runs
         # normally; startup catch-up can be re-enabled with ENABLE_STARTUP_CATCHUP=true.
         self.enable_startup_catchup = os.getenv('ENABLE_STARTUP_CATCHUP', 'false').strip().lower() in ('1', 'true', 'yes', 'on')
+        self.batch_size = int(os.getenv('SCHEDULER_TRAIN_BATCH_SIZE', '20'))
+        self.batch_sleep_seconds = int(os.getenv('SCHEDULER_BATCH_SLEEP_SECONDS', '10'))
+        self.summary_path = Path('monitoring') / 'reports' / 'daily_training_summary.json'
         from mlops.config import MLOpsConfig
         self.stocks = MLOpsConfig.get_stocks()
+
+    def _publish_event(self, event_type: str, *, ticker=None, payload=None, severity='info'):
+        try:
+            from unified_engine.event_bus import publish_event
+            publish_event(
+                event_type,
+                ticker=ticker,
+                source='daily_training_scheduler',
+                payload=payload or {},
+                severity=severity,
+            )
+        except Exception as event_err:
+            logger.debug("MLOps event publish skipped: %s", event_err)
+
+    def _write_summary(self, result_summary):
+        try:
+            self.summary_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.summary_path, 'w', encoding='utf-8') as handle:
+                json.dump(result_summary, handle, indent=2, default=str)
+        except Exception as write_err:
+            logger.warning("[MLOps] Could not write scheduler summary: %s", write_err)
 
     def _latest_registry_training_date(self):
         """Return latest model registration date from registry metadata, or None."""
@@ -100,21 +126,35 @@ class ModelTrainingScheduler:
     
     def train_models_job(self):
         """Job that runs full model training with rate-limiting for API safety"""
+        run_started = datetime.utcnow()
         try:
             from mlops.config import MLOpsConfig
             # Dynamic reload: catch any new stocks added by "Train-on-Demand"
             self.stocks = MLOpsConfig.get_stocks()
             
             logger.info("[MLOps] Starting scheduled training for %s stocks...", len(self.stocks))
+            self._publish_event(
+                'daily_training_started',
+                payload={
+                    'stock_count': len(self.stocks),
+                    'training_time_utc': self.training_time_utc,
+                    'weekdays_only': self.weekdays_only,
+                    'batch_size': self.batch_size,
+                }
+            )
             self.last_training_time = datetime.now()
             
             results = {}
             
             # --- Rate-Limited Batch Processing ---
-            batch_size = 20
+            batch_size = max(1, self.batch_size)
             for i in range(0, len(self.stocks), batch_size):
                 batch = self.stocks[i:i + batch_size]
                 logger.info("[MLOps] Processing batch: %s", batch)
+                self._publish_event(
+                    'daily_training_batch_started',
+                    payload={'batch_index': int(i / batch_size) + 1, 'tickers': batch}
+                )
                 
                 for ticker in batch:
                     try:
@@ -124,9 +164,15 @@ class ModelTrainingScheduler:
                         
                         if last_run_date == today:
                             results[ticker] = {'status': 'skipped_already_trained'}
+                            self._publish_event(
+                                'ticker_training_skipped',
+                                ticker=ticker,
+                                payload={'reason': 'already_trained_today'}
+                            )
                             continue
                             
                         logger.info("[MLOps] Training: %s...", ticker)
+                        self._publish_event('ticker_training_started', ticker=ticker)
                         
                         # Unified Engine v5.0 — the ONLY training path
                         from unified_engine.training import train_unified_model
@@ -135,6 +181,12 @@ class ModelTrainingScheduler:
                         if not train_result.success:
                             results[ticker] = {'status': 'skipped', 'message': train_result.reason}
                             logger.warning("[MLOps] %s train skipped: %s", ticker, train_result.reason)
+                            self._publish_event(
+                                'ticker_training_skipped',
+                                ticker=ticker,
+                                severity='warning',
+                                payload={'reason': train_result.reason}
+                            )
                             continue
 
                         try:
@@ -158,34 +210,75 @@ class ModelTrainingScheduler:
                             'version': train_result.model_version,
                             'accuracy': train_result.metrics.get('accuracy', 'N/A'),
                             'auc': train_result.metrics.get('auc', 'N/A'),
+                            'quality_gate': train_result.metrics.get('quality_gate', 'unknown'),
                             'status': 'success'
                         }
+                        self._publish_event(
+                            'ticker_training_completed',
+                            ticker=ticker,
+                            payload=results[ticker]
+                        )
                     except Exception as e:
                         logger.error("[MLOps] Training failed for %s: %s", ticker, e)
                         results[ticker] = {'error': str(e), 'status': 'failed'}
+                        self._publish_event(
+                            'ticker_training_failed',
+                            ticker=ticker,
+                            severity='error',
+                            payload={'error': str(e)}
+                        )
                 
                 # Sleep if there are more batches to process
                 if i + batch_size < len(self.stocks):
-                    wait_time = 10
+                    wait_time = max(0, self.batch_sleep_seconds)
                     logger.info("[MLOps] API Safety: sleeping for %s seconds before next batch...", wait_time)
-                    time.sleep(wait_time)
+                    if wait_time:
+                        time.sleep(wait_time)
             
             # --- Store results ---
+            run_finished = datetime.utcnow()
             result_summary = {
                 'timestamp': self.last_training_time.isoformat(),
+                'run_started_at': run_started.isoformat() + 'Z',
+                'run_finished_at': run_finished.isoformat() + 'Z',
+                'duration_seconds': round((run_finished - run_started).total_seconds(), 2),
+                'schedule': {
+                    'training_time_utc': self.training_time_utc,
+                    'weekdays_only': self.weekdays_only,
+                    'startup_catchup_enabled': self.enable_startup_catchup,
+                    'batch_size': batch_size,
+                },
                 'results': results,
                 'total_trained': len([v for v in results.values() if v.get('status') == 'success']),
-                'total_failed': len([v for v in results.values() if v.get('status') == 'failed'])
+                'total_failed': len([v for v in results.values() if v.get('status') == 'failed']),
+                'total_skipped': len([v for v in results.values() if str(v.get('status', '')).startswith('skipped')]),
             }
             
             self.training_results.append(result_summary)
             if len(self.training_results) > 24:
                 self.training_results = self.training_results[-24:]
+            self._write_summary(result_summary)
+            self._publish_event(
+                'daily_training_completed',
+                payload={
+                    'total_trained': result_summary['total_trained'],
+                    'total_failed': result_summary['total_failed'],
+                    'total_skipped': result_summary['total_skipped'],
+                    'duration_seconds': result_summary['duration_seconds'],
+                    'summary_path': str(self.summary_path),
+                },
+                severity='warning' if result_summary['total_failed'] else 'info'
+            )
             
             logger.info(f"[MLOps] Training completed: {result_summary['total_trained']} models updated.")
                 
         except Exception as e:
             logger.error(f"[MLOps] Critical error in scheduler job: {e}")
+            self._publish_event(
+                'daily_training_failed',
+                severity='error',
+                payload={'error': str(e), 'started_at': run_started.isoformat() + 'Z'}
+            )
     
     def run_scheduler(self):
         """Run the scheduler loop with Airflow-aligned default timing."""
@@ -260,6 +353,12 @@ class ModelTrainingScheduler:
             'is_running': self.is_running,
             'last_training': self.last_training_time.isoformat() if self.last_training_time else None,
             'next_training': self._get_next_training_time(),
+            'training_time_utc': self.training_time_utc,
+            'weekdays_only': self.weekdays_only,
+            'startup_catchup_enabled': self.enable_startup_catchup,
+            'stock_count': len(self.stocks),
+            'batch_size': self.batch_size,
+            'summary_path': str(self.summary_path),
             'training_history': self.training_results[-5:] if self.training_results else []
         }
     def _get_next_training_time(self):

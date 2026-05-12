@@ -562,10 +562,30 @@ def _start_ticker_model_training(ticker: str, *, force: bool = False) -> tuple[b
         progress=8,
         message='Training request accepted. Preparing a fresh stock-specific model.'
     )
+    try:
+        from unified_engine.event_bus import publish_event
+        publish_event(
+            'training_queued',
+            ticker=ticker_key,
+            source='training_orchestrator',
+            payload={'force': force, 'stage': 'queued'}
+        )
+    except Exception:
+        pass
 
     def background_train():
         try:
             print(f"Background retry training started for {ticker_key}", flush=True)
+            try:
+                from unified_engine.event_bus import publish_event
+                publish_event(
+                    'training_started',
+                    ticker=ticker_key,
+                    source='training_orchestrator',
+                    payload={'stage': 'market_data_validation'}
+                )
+            except Exception:
+                pass
             _update_ticker_training_job(
                 ticker_key,
                 state='training',
@@ -600,6 +620,16 @@ def _start_ticker_model_training(ticker: str, *, force: bool = False) -> tuple[b
                     progress=100,
                     message='Model is ready. Forecasts now use trained ticker-specific ML artifacts and live market features.'
                 )
+                try:
+                    from unified_engine.event_bus import publish_event
+                    publish_event(
+                        'training_completed',
+                        ticker=ticker_key,
+                        source='training_orchestrator',
+                        payload={'metrics': train_result.metrics, 'stage': 'custom_model_ready'}
+                    )
+                except Exception:
+                    pass
                 print(f"Background retry training completed for {ticker_key}", flush=True)
             else:
                 reason = train_result.reason if train_result else 'unknown training failure'
@@ -611,6 +641,17 @@ def _start_ticker_model_training(ticker: str, *, force: bool = False) -> tuple[b
                     progress=0,
                     message=failure_message
                 )
+                try:
+                    from unified_engine.event_bus import publish_event
+                    publish_event(
+                        'training_failed',
+                        ticker=ticker_key,
+                        source='training_orchestrator',
+                        severity='warning',
+                        payload={'reason': str(reason), 'state': failure_state, 'stage': failure_stage}
+                    )
+                except Exception:
+                    pass
                 print(f"Background retry training failed for {ticker_key}: {reason}", flush=True)
         except Exception as train_err:
             failure_state, failure_stage, failure_message = _training_failure_status(train_err)
@@ -621,6 +662,17 @@ def _start_ticker_model_training(ticker: str, *, force: bool = False) -> tuple[b
                 progress=0,
                 message=failure_message
             )
+            try:
+                from unified_engine.event_bus import publish_event
+                publish_event(
+                    'training_failed',
+                    ticker=ticker_key,
+                    source='training_orchestrator',
+                    severity='error',
+                    payload={'reason': str(train_err), 'state': failure_state, 'stage': failure_stage}
+                )
+            except Exception:
+                pass
             print(f"Background retry training failed for {ticker_key}: {train_err}", flush=True)
         finally:
             with _ultimate_training_state_lock:
@@ -1219,6 +1271,55 @@ def mlops_status():
     })
 
 
+@app.route('/api/mlops/dashboard')
+def mlops_dashboard():
+    """Unified MLOps dashboard for model registry, inference, and event health."""
+    try:
+        from unified_engine.mlops_dashboard import build_mlops_dashboard
+
+        ticker = request.args.get('ticker')
+        return jsonify(build_mlops_dashboard(ticker=ticker))
+    except Exception as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 500
+
+
+@app.route('/api/mlops/events')
+def mlops_events():
+    """Recent MLOps events. Works as the free local Kafka replacement."""
+    try:
+        from unified_engine.event_bus import list_events
+
+        return jsonify({
+            'success': True,
+            'events': list_events(
+                ticker=request.args.get('ticker'),
+                event_type=request.args.get('event_type'),
+                limit=request.args.get('limit', default=100, type=int),
+            ),
+            'timestamp': datetime.now().isoformat()
+        })
+    except Exception as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 500
+
+
+@app.route('/api/mlops/predictions')
+def mlops_predictions():
+    """Served prediction audit log for inference monitoring."""
+    try:
+        from unified_engine.prediction_store import list_served_predictions, prediction_summary
+
+        ticker = request.args.get('ticker')
+        limit = request.args.get('limit', default=100, type=int)
+        return jsonify({
+            'success': True,
+            'summary': prediction_summary(limit=1000),
+            'predictions': list_served_predictions(ticker=ticker, limit=limit),
+            'timestamp': datetime.now().isoformat()
+        })
+    except Exception as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 500
+
+
 @app.route('/api/mlops/registry')
 def mlops_unified_registry():
     """Return latest Unified Engine registry records and promotion status."""
@@ -1671,6 +1772,32 @@ def get_stock_data(ticker):
                 'success': False,
                 'error': f'Invalid data structure for {resolved_ticker}'
             }), 500
+
+        data_quality = {'status': 'unavailable', 'score': None, 'issues': [], 'warnings': []}
+        drift_report = {'status': 'unavailable', 'score': 0.0}
+        try:
+            from unified_engine.data_quality import validate_ohlcv
+            from unified_engine.drift_monitor import assess_market_drift
+            from unified_engine.event_bus import publish_event
+
+            data_quality = validate_ohlcv(hist)
+            drift_report = assess_market_drift(hist)
+            publish_event(
+                'inference_requested',
+                ticker=resolved_ticker,
+                source='prediction_api',
+                payload={
+                    'requested_ticker': requested_ticker,
+                    'resolved_exchange': resolved_exchange,
+                    'history_rows': int(len(hist)),
+                    'data_quality_status': data_quality.get('status'),
+                    'drift_status': drift_report.get('status'),
+                    'days': days,
+                },
+                severity='warning' if data_quality.get('status') == 'failed' else 'info'
+            )
+        except Exception as observability_err:
+            print(f"MLOps observability warning for {resolved_ticker}: {observability_err}")
 
         metadata_symbols = []
         for candidate_symbol in [resolved_ticker, requested_ticker, history_info.get('symbol')]:
@@ -2504,6 +2631,12 @@ def get_stock_data(ticker):
             'prediction_horizon': prediction_horizon,
             'model_freshness': model_freshness,
             'probability_calibration': probability_calibration,
+            'mlops': {
+                'data_quality': data_quality,
+                'drift': drift_report,
+                'event_stream': 'local_jsonl',
+                'prediction_audit': 'enabled',
+            },
             'backtest_ghost': backtest_ghost[-30:],
             'day_change': safe_float(day_change),
             'day_change_percent': safe_float(day_change_percent),
@@ -2552,6 +2685,41 @@ def get_stock_data(ticker):
             'quantile_returns': cached_payload.get('quantile_returns', {}) if isinstance(cached_payload, dict) else {},
             'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         }
+
+        try:
+            from unified_engine.event_bus import publish_event
+            from unified_engine.prediction_store import record_served_prediction
+
+            record_served_prediction(
+                ticker=resolved_ticker,
+                horizon_days=days,
+                current_price=float(current_price),
+                signal=recommendation_payload.get('signal', ai_signal),
+                trust_score=model_trust.get('score') if isinstance(model_trust, dict) else None,
+                risk_label=(risk_profile or {}).get('label', 'Unknown'),
+                model_version=str(v2_payload.get('model_version', 'unknown')) if isinstance(v2_payload, dict) else 'unknown',
+                prediction_ready=trained_prediction_ready,
+                currency=currency,
+                extra={
+                    'data_quality': data_quality.get('status'),
+                    'drift': drift_report.get('status'),
+                    'analysis_mode': model_status.get('analysis_mode'),
+                },
+            )
+            publish_event(
+                'prediction_served',
+                ticker=resolved_ticker,
+                source='prediction_api',
+                payload={
+                    'signal': recommendation_payload.get('signal', ai_signal),
+                    'prediction_ready': trained_prediction_ready,
+                    'trust': model_trust.get('score') if isinstance(model_trust, dict) else None,
+                    'risk': (risk_profile or {}).get('label', 'Unknown'),
+                    'currency': currency,
+                }
+            )
+        except Exception as audit_err:
+            print(f"Prediction audit logging failed for {resolved_ticker}: {audit_err}")
 
         if app.debug and provider_message:
             response['provider_note'] = provider_message
